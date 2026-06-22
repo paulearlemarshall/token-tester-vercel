@@ -1,9 +1,9 @@
 import { encode } from 'gpt-tokenizer'
 import type { ChatParams, ModelFetchParams } from './provider-api'
 
-async function postJson<T>(url: string, payload: unknown): Promise<T> {
+async function sendJson<T>(url: string, payload: unknown, method = 'POST'): Promise<T> {
   const res = await fetch(url, {
-    method: 'POST',
+    method,
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
   })
@@ -16,17 +16,31 @@ async function postJson<T>(url: string, payload: unknown): Promise<T> {
 
 export const webApi = {
   fetchModels(params: ModelFetchParams) {
-    return postJson<any>('/api/models', params)
+    return sendJson<any>('/api/models', params)
   },
 
   chatCompletion(params: ChatParams) {
-    return postJson<any>('/api/chat', params)
+    return sendJson<any>('/api/chat', params)
   },
 
   async getPricing() {
     const res = await fetch('/api/pricing')
     if (!res.ok) return {}
     return res.json()
+  },
+
+  async savePricing(params: {
+    serviceProvider: string
+    modelId: string
+    input: number
+    output: number
+    upstreamProvider?: string | null
+    displayName?: string | null
+  }) {
+    return sendJson<any>('/api/pricing', {
+      ...params,
+      source: 'manual',
+    }, 'PUT')
   },
 
   async countTokens(text: string) {

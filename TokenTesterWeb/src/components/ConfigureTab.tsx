@@ -5,6 +5,10 @@ import { PROVIDER_PRESETS, PROVIDER_LOGOS } from '../utils/constants'
 import type { ProviderConfig, ProviderType } from '../types'
 import { webApi } from '../lib/web-api'
 
+function serviceKey(providerName: string) {
+  return providerName.trim().toLowerCase().replace(/&/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '')
+}
+
 export function ConfigureTab() {
   const { config, initFromPreset, addProvider, updateProvider, removeProvider } = useStore()
   const [showAdd, setShowAdd] = useState(false)
@@ -268,8 +272,16 @@ export function ConfigureTab() {
                                 responseText: result.responseText || JSON.stringify(result, null, 2),
                               })
                               if (result.pricing) {
+                                const providerKey = serviceKey(prov.name)
                                 for (const [modelId, p] of Object.entries(result.pricing) as [string, {input: number; output: number}][]) {
-                                  useStore.getState().setModelPricing(`${prov.name.toLowerCase()}/${modelId}`, p.input, p.output)
+                                  useStore.getState().setModelPricing(`${providerKey}/${modelId}`, p.input, p.output)
+                                  webApi.savePricing({
+                                    serviceProvider: providerKey,
+                                    modelId,
+                                    input: p.input,
+                                    output: p.output,
+                                    displayName: modelId,
+                                  }).catch(err => console.error('Failed to save fetched pricing', err))
                                 }
                               }
                             } else {

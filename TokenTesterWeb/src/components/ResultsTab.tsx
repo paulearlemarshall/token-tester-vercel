@@ -12,6 +12,10 @@ type SortField = 'provider' | 'model' | 'inRate' | 'outRate' | 'input' | 'output
 
 const CHART_COLORS = ['#6366f1', '#8b5cf6', '#ec4899', '#f59e0b', '#10b981', '#06b6d4', '#f97316', '#ef4444', '#14b8a6', '#a855f7']
 
+function serviceKey(providerName: string) {
+  return providerName.trim().toLowerCase().replace(/&/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '')
+}
+
 export function ResultsTab() {
   const { queue, builtinPricing } = useStore()
   const [view, setView] = useState<'table' | 'charts'>('table')
@@ -43,7 +47,7 @@ export function ResultsTab() {
     if (run.priceOverride && (run.priceOverride.input > 0 || run.priceOverride.output > 0)) {
       return { input: run.priceOverride.input, output: run.priceOverride.output, per: '1M' }
     }
-    const key = `${run.providerName.toLowerCase()}/${run.model}`
+    const key = `${serviceKey(run.providerName)}/${run.model}`
     if (builtinPricing[key]) return builtinPricing[key]
     return lookupBuiltin(run.model)
   }
@@ -83,7 +87,7 @@ export function ResultsTab() {
   const byModel = useMemo(() => {
     const map = new Map<string, { runs: number; inputTokens: number; outputTokens: number; inputCost: number; outputCost: number; cost: number; latencyMs: number[] }>()
     for (const r of completed) {
-      const key = `${r.providerName.toLowerCase()}/${r.model}`
+      const key = `${serviceKey(r.providerName)}/${r.model}`
       const entry = map.get(key) || { runs: 0, inputTokens: 0, outputTokens: 0, inputCost: 0, outputCost: 0, cost: 0, latencyMs: [] }
       const rate = getRate(r)
       const divisor = rate?.per === '1K' ? 1000 : 1_000_000

@@ -19,3 +19,10 @@ vercel deploy --prebuilt
 ```
 
 Provider secrets are read only by Next.js route handlers from Vercel environment variables. See `TokenTesterWeb/.env.example` for supported keys.
+
+Model pricing is stored in Neon Postgres when `DATABASE_URL` is configured. The bundled JSON pricing remains a fallback and seed source.
+
+```powershell
+npm run db:setup
+npm run db:seed-pricing
+```

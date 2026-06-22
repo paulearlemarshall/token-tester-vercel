@@ -1,6 +1,18 @@
 import { NextResponse } from 'next/server'
-import { flattenPricing } from '@/lib/pricing'
+import { getPricing, upsertModelPrice } from '@/lib/pricing'
+
+export const dynamic = 'force-dynamic'
 
 export async function GET() {
-  return NextResponse.json(flattenPricing())
+  return NextResponse.json(await getPricing())
+}
+
+export async function PUT(request: Request) {
+  try {
+    const payload = await request.json()
+    const result = await upsertModelPrice(payload)
+    return NextResponse.json(result)
+  } catch (err: any) {
+    return NextResponse.json({ error: err.message ?? String(err) }, { status: 400 })
+  }
 }

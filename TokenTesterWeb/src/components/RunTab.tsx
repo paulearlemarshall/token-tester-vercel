@@ -67,6 +67,10 @@ function retryWithCompletionTokens(body: any, maxTokens: number): any {
   return retry
 }
 
+function serviceKey(providerName: string) {
+  return providerName.trim().toLowerCase().replace(/&/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '')
+}
+
 export function RunTab() {
   const {
     config, systemPrompt, customPrompts, fileItems,
@@ -162,7 +166,7 @@ export function RunTab() {
   }
 
   function effectivePricing(providerName: string, modelId: string): { input: number; output: number } {
-    const prefixed = `${providerName.toLowerCase()}/${modelId}`
+    const prefixed = `${serviceKey(providerName)}/${modelId}`
     const override = modelPricing[prefixed]
     if (override && (override.input > 0 || override.output > 0)) return override
     if (builtinPricing[prefixed]) return { input: builtinPricing[prefixed].input, output: builtinPricing[prefixed].output }
@@ -230,12 +234,24 @@ export function RunTab() {
             batchFiles: tc.batchFiles,
             status: 'queued',
             timestamp: Date.now(),
-            priceOverride: modelPricing[`${prov.name.toLowerCase()}/${model}`],
+            priceOverride: modelPricing[`${serviceKey(prov.name)}/${model}`],
           })
         }
       }
     }
     setQueue(runs)
+  }
+
+  function updateModelPrice(providerName: string, modelId: string, input: number, output: number) {
+    const providerKey = serviceKey(providerName)
+    setModelPricing(`${providerKey}/${modelId}`, input, output)
+    webApi.savePricing({
+      serviceProvider: providerKey,
+      modelId,
+      input,
+      output,
+      displayName: modelId,
+    }).catch(err => console.error('Failed to save model pricing', err))
   }
 
   async function runAll() {
@@ -620,7 +636,7 @@ export function RunTab() {
                                       min={0}
                                       step={0.01}
                                       value={pricing.input || ''}
-                                      onChange={e => setModelPricing(`${prov.name.toLowerCase()}/${model}`, parseFloat(e.target.value) || 0, pricing.output)}
+                                      onChange={e => updateModelPrice(prov.name, model, parseFloat(e.target.value) || 0, pricing.output)}
                                       className="w-full bg-surface-800 border border-surface-600 rounded text-[10px] px-1 py-0.5 text-surface-100 focus:outline-none focus:ring-1 focus:ring-blue-500"
                                       placeholder="0"
                                     />
@@ -632,7 +648,7 @@ export function RunTab() {
                                       min={0}
                                       step={0.01}
                                       value={pricing.output || ''}
-                                      onChange={e => setModelPricing(`${prov.name.toLowerCase()}/${model}`, pricing.input, parseFloat(e.target.value) || 0)}
+                                      onChange={e => updateModelPrice(prov.name, model, pricing.input, parseFloat(e.target.value) || 0)}
                                       className="w-full bg-surface-800 border border-surface-600 rounded text-[10px] px-1 py-0.5 text-surface-100 focus:outline-none focus:ring-1 focus:ring-blue-500"
                                       placeholder="0"
                                     />

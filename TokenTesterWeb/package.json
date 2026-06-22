@@ -6,9 +6,12 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "db:setup": "node scripts/setup-pricing-db.mjs",
+    "db:seed-pricing": "node scripts/seed-pricing.mjs"
   },
   "dependencies": {
+    "@neondatabase/serverless": "^1.1.0",
     "gpt-tokenizer": "^3.4.0",
     "lucide-react": "^1.21.0",
     "next": "16.2.9",
