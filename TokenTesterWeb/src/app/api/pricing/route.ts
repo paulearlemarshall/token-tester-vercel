@@ -4,7 +4,11 @@ import { getPricing, upsertModelPrice } from '@/lib/pricing'
 export const dynamic = 'force-dynamic'
 
 export async function GET() {
-  return NextResponse.json(await getPricing())
+  try {
+    return NextResponse.json(await getPricing())
+  } catch (err: any) {
+    return NextResponse.json({ error: err.message ?? String(err) }, { status: 503 })
+  }
 }
 
 export async function PUT(request: Request) {

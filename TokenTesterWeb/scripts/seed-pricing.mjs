@@ -58,24 +58,28 @@ for (const row of rows) {
 console.log(`seeded ${count} model price rows, skipped ${skipped} non-price rows`)
 
 function loadPriceRows() {
-  const flatJsonPath = path.resolve('..', 'model-prices-db.json')
-  if (fs.existsSync(flatJsonPath)) {
-    const rows = JSON.parse(fs.readFileSync(flatJsonPath, 'utf8'))
-    if (Array.isArray(rows)) return rows
+  const importPath = process.argv[2]
+  if (!importPath) {
+    throw new Error('Usage: npm run db:import-pricing -- <path-to-json-or-ndjson>')
   }
 
-  const ndjsonPath = path.resolve('..', 'model-prices-db.ndjson')
-  if (fs.existsSync(ndjsonPath)) {
-    return fs.readFileSync(ndjsonPath, 'utf8')
+  const fullPath = path.resolve(importPath)
+  if (!fs.existsSync(fullPath)) {
+    throw new Error(`Pricing import file not found: ${fullPath}`)
+  }
+
+  if (fullPath.endsWith('.ndjson')) {
+    return fs.readFileSync(fullPath, 'utf8')
       .split(/\r?\n/)
       .filter(Boolean)
       .map(line => JSON.parse(line))
   }
 
-  const nestedPath = path.resolve('src/data/models.json')
-  const nested = JSON.parse(fs.readFileSync(nestedPath, 'utf8'))
+  const parsed = JSON.parse(fs.readFileSync(fullPath, 'utf8'))
+  if (Array.isArray(parsed)) return parsed
+
   const rows = []
-  for (const [provider, providerModels] of Object.entries(nested)) {
+  for (const [provider, providerModels] of Object.entries(parsed)) {
     for (const [model, pricing] of Object.entries(providerModels)) {
       rows.push({ provider, model, input: pricing.input, output: pricing.output, per: pricing.per ?? '1M' })
     }

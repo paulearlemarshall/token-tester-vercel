@@ -1,7 +1,5 @@
-import models from '../data/models.json'
 import { getSql } from './db'
 
-type NestedPricing = Record<string, Record<string, { input: number; output: number; per?: string }>>
 type FlatPricing = Record<string, { input: number; output: number; per: string }>
 
 export interface ModelPriceInput {
@@ -14,38 +12,22 @@ export interface ModelPriceInput {
   source?: string
 }
 
-export function flattenPricing(nested: NestedPricing = models as NestedPricing) {
-  const flat: FlatPricing = {}
-  for (const [provider, providerModels] of Object.entries(nested)) {
-    for (const [model, pricing] of Object.entries(providerModels)) {
-      if (pricing.input < 0 || pricing.output < 0) continue
-      flat[`${provider}/${model}`] = { ...pricing, per: pricing.per ?? '1M' }
-    }
-  }
-  return flat
-}
-
 export async function getPricing() {
-  const fallback = flattenPricing()
-  try {
-    const sql = getSql()
-    const rows = await sql`
-      select service_provider, model_id, input_per_1m, output_per_1m
-      from model_prices
-      order by service_provider, model_id
-    `
-    const dbPricing: FlatPricing = {}
-    for (const row of rows as any[]) {
-      dbPricing[`${row.service_provider}/${row.model_id}`] = {
-        input: Number(row.input_per_1m),
-        output: Number(row.output_per_1m),
-        per: '1M',
-      }
+  const sql = getSql()
+  const rows = await sql`
+    select service_provider, model_id, input_per_1m, output_per_1m
+    from model_prices
+    order by service_provider, model_id
+  `
+  const dbPricing: FlatPricing = {}
+  for (const row of rows as any[]) {
+    dbPricing[`${row.service_provider}/${row.model_id}`] = {
+      input: Number(row.input_per_1m),
+      output: Number(row.output_per_1m),
+      per: '1M',
     }
-    return { ...fallback, ...dbPricing }
-  } catch {
-    return fallback
   }
+  return dbPricing
 }
 
 export async function upsertModelPrice(input: ModelPriceInput) {

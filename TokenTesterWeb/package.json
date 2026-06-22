@@ -8,7 +8,7 @@
     "start": "next start",
     "lint": "eslint",
     "db:setup": "node scripts/setup-pricing-db.mjs",
-    "db:seed-pricing": "node scripts/seed-pricing.mjs"
+    "db:import-pricing": "node scripts/seed-pricing.mjs"
   },
   "dependencies": {
     "@neondatabase/serverless": "^1.1.0",
