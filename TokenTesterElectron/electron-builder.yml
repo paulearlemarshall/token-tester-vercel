@@ -1,0 +1,17 @@
+appId: com.tokentester.app
+productName: Token Tester
+directories:
+  buildResources: resources
+  output: out
+files:
+  - dist
+  - dist-electron
+win:
+  target:
+    - nsis
+mac:
+  target:
+    - dmg
+linux:
+  target:
+    - AppImage

@@ -1,0 +1,299 @@
+import { ipcMain } from 'electron'
+
+function parseHeaders(raw?: string): Record<string, string> {
+  if (!raw) return {}
+  const headers: Record<string, string> = {}
+  for (const line of raw.split('\n')) {
+    const idx = line.indexOf(':')
+    if (idx === -1) continue
+    const k = line.slice(0, idx).trim()
+    const v = line.slice(idx + 1).trim()
+    if (k && v) headers[k] = v
+  }
+  return headers
+}
+
+interface ChatParams {
+  provider: {
+    type: 'openai-compat' | 'anthropic' | 'gemini'
+    baseUrl: string
+    apiKeyEnv: string
+    headers?: string
+  }
+  model: string
+  messages: any[]
+  maxTokens?: number
+  requestBody?: any
+}
+
+export function registerIpcHandlers() {
+  ipcMain.handle('api:fetchModels', async (_event, params: { type: string; baseUrl: string; apiKeyEnv: string; headers?: string }) => {
+    const apiKey = process.env[params.apiKeyEnv] || ''
+    if (!apiKey) return { models: [], error: `API key not found for env var "${params.apiKeyEnv}"` }
+
+    try {
+      if (params.type === 'openai-compat') {
+        const url = `${params.baseUrl.replace(/\/+$/, '')}/v1/models`
+        const extra = parseHeaders(params.headers)
+        const res = await fetch(url, {
+          headers: { Authorization: `Bearer ${apiKey}`, ...extra },
+        })
+        if (!res.ok) return { models: [], error: `${res.status}: ${res.statusText}` }
+        const data = await res.json()
+        const rawModels = data.data || []
+        const models = rawModels
+          .map((m: any) => m.id)
+          .filter((id: string) => !id.startsWith('ft:'))
+          .sort()
+        const modelMetas = rawModels.map((m: any) => ({
+          id: m.id,
+          created: m.created,
+          owned_by: m.owned_by,
+          context_length: m.context_length,
+          modality: m.architecture?.modality,
+        }))
+        const pricing: Record<string, { input: number; output: number }> = {}
+        for (const m of rawModels) {
+          if (m.pricing?.prompt != null || m.pricing?.completion != null) {
+            pricing[m.id] = {
+              input: (m.pricing.prompt ?? 0) * 1_000_000,
+              output: (m.pricing.completion ?? 0) * 1_000_000,
+            }
+          }
+        }
+        return {
+          models,
+          modelMetas: modelMetas.length > 0 ? modelMetas : undefined,
+          pricing: Object.keys(pricing).length > 0 ? pricing : undefined,
+          responseText: JSON.stringify(data, null, 2),
+        }
+      }
+
+      if (params.type === 'gemini') {
+        const url = `https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`
+        const res = await fetch(url)
+        if (!res.ok) return { models: [], error: `${res.status}: ${res.statusText}` }
+        const data = await res.json()
+        const models = (data.models || [])
+          .map((m: any) => m.name.replace('models/', ''))
+          .filter((id: string) => id.startsWith('gemini-'))
+          .sort()
+        return { models, responseText: JSON.stringify(data, null, 2) }
+      }
+
+      if (params.type === 'anthropic') {
+        const url = `${params.baseUrl.replace(/\/+$/, '')}/v1/models`
+        const res = await fetch(url, {
+          headers: { 'X-Api-Key': apiKey, 'anthropic-version': '2023-06-01' },
+        })
+        if (!res.ok) return { models: [], error: `${res.status}: ${res.statusText}` }
+        const data = await res.json()
+        const rawModels = data.data || []
+        const models = rawModels
+          .map((m: any) => m.id)
+          .sort()
+        return {
+          models,
+          modelMetas: rawModels.map((m: any) => ({ id: m.id, created: m.created_at })),
+          responseText: JSON.stringify(data, null, 2),
+        }
+      }
+
+      return { models: [], error: `Unknown provider type: ${params.type}` }
+    } catch (err: any) {
+      return { models: [], error: err.message ?? String(err) }
+    }
+  })
+
+  ipcMain.handle('api:chat', async (_event, params: ChatParams) => {
+    const { provider, model, messages, maxTokens = 4096 } = params
+    const apiKey = process.env[provider.apiKeyEnv] || ''
+    if (!apiKey) {
+      return {
+        inputTokens: 0, outputTokens: 0, totalTokens: 0,
+        responseText: '', latencyMs: 0,
+        error: `API key not found for env var "${provider.apiKeyEnv}". Check your .env file.`,
+      }
+    }
+
+    const start = performance.now()
+
+    try {
+      let result: ApiResult
+
+      switch (provider.type) {
+        case 'openai-compat':
+          result = await chatOpenAICompat(provider.baseUrl, apiKey, model, messages, maxTokens, provider.headers, params.requestBody)
+          break
+        case 'anthropic':
+          result = await chatAnthropic(apiKey, model, messages, maxTokens)
+          break
+        case 'gemini':
+          result = await chatGemini(apiKey, model, messages, maxTokens)
+          break
+        default:
+          throw new Error(`Unknown provider type: ${provider.type}`)
+      }
+
+      const latencyMs = Math.round(performance.now() - start)
+      return { ...result, latencyMs }
+    } catch (err: any) {
+      return {
+        inputTokens: 0,
+        outputTokens: 0,
+        totalTokens: 0,
+        responseText: '',
+        latencyMs: Math.round(performance.now() - start),
+        error: err.message ?? String(err),
+      }
+    }
+  })
+}
+
+interface ApiResult {
+  inputTokens: number
+  outputTokens: number
+  totalTokens: number
+  responseText: string
+  error?: string
+}
+
+async function chatOpenAICompat(
+  baseUrl: string, apiKey: string, model: string, messages: any[], maxTokens: number, extraHeaders?: string, requestBody?: any
+): Promise<ApiResult> {
+  const url = `${baseUrl.replace(/\/+$/, '')}/v1/chat/completions`
+  const extra = parseHeaders(extraHeaders)
+
+  const body = requestBody ?? { model, messages, max_tokens: maxTokens }
+
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}`, ...extra },
+    body: JSON.stringify(body),
+  })
+
+  if (!res.ok) {
+    const text = await res.text()
+    throw new Error(`${res.status} ${res.statusText}: ${text.slice(0, 500)}`)
+  }
+
+  const data = await res.json()
+  return {
+    inputTokens: data.usage?.prompt_tokens ?? 0,
+    outputTokens: data.usage?.completion_tokens ?? 0,
+    totalTokens: data.usage?.total_tokens ?? 0,
+    responseText: data.choices?.[0]?.message?.content ?? '',
+  }
+}
+
+async function chatAnthropic(
+  apiKey: string, model: string, messages: any[], maxTokens: number
+): Promise<ApiResult> {
+  const systemMsg = messages.find((m: any) => m.role === 'system')
+  const otherMsgs = messages.filter((m: any) => m.role !== 'system')
+
+  const body: any = {
+    model,
+    messages: otherMsgs.map((m: any) => ({
+      role: m.role === 'assistant' ? 'assistant' : 'user',
+      content: buildAnthropicContent(m.content),
+    })),
+    max_tokens: maxTokens,
+  }
+  if (systemMsg) body.system = buildAnthropicContent(systemMsg.content)
+
+  const res = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': apiKey,
+      'anthropic-version': '2023-06-01',
+    },
+    body: JSON.stringify(body),
+  })
+
+  if (!res.ok) {
+    const text = await res.text()
+    throw new Error(`${res.status} ${res.statusText}: ${text.slice(0, 500)}`)
+  }
+
+  const data = await res.json()
+  return {
+    inputTokens: data.usage?.input_tokens ?? 0,
+    outputTokens: data.usage?.output_tokens ?? 0,
+    totalTokens: (data.usage?.input_tokens ?? 0) + (data.usage?.output_tokens ?? 0),
+    responseText: data.content?.[0]?.text ?? '',
+  }
+}
+
+function buildAnthropicContent(content: any): any {
+  if (typeof content === 'string') {
+    if (content.includes('[Image]')) {
+      return [{ type: 'text', text: content }]
+    }
+    return content
+  }
+  if (Array.isArray(content)) {
+    return content.map((part: any) => {
+      if (part.type === 'image_url') {
+        const match = part.image_url.url.match(/^data:(.+?);base64,(.+)$/)
+        if (match) {
+          const isDoc = match[1].startsWith('application/')
+          return { type: isDoc ? 'document' : 'image', source: { type: 'base64', media_type: match[1], data: match[2] } }
+        }
+      }
+      return { type: 'text', text: part.text ?? '' }
+    })
+  }
+  return String(content)
+}
+
+async function chatGemini(
+  apiKey: string, model: string, messages: any[], maxTokens: number
+): Promise<ApiResult> {
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`
+
+  const contents: any[] = []
+  for (const msg of messages) {
+    if (msg.role === 'system') continue
+    contents.push({
+      role: msg.role === 'assistant' ? 'model' : 'user',
+      parts: buildGeminiParts(msg.content),
+    })
+  }
+
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ contents, generationConfig: { maxOutputTokens: maxTokens } }),
+  })
+
+  if (!res.ok) {
+    const text = await res.text()
+    throw new Error(`${res.status} ${res.statusText}: ${text.slice(0, 500)}`)
+  }
+
+  const data = await res.json()
+  return {
+    inputTokens: data.usageMetadata?.promptTokenCount ?? 0,
+    outputTokens: data.usageMetadata?.candidatesTokenCount ?? 0,
+    totalTokens: data.usageMetadata?.totalTokenCount ?? 0,
+    responseText: data.candidates?.[0]?.content?.parts?.[0]?.text ?? '',
+  }
+}
+
+function buildGeminiParts(content: any): any[] {
+  if (typeof content === 'string') return [{ text: content }]
+  if (Array.isArray(content)) {
+    return content.map((part: any) => {
+      if (part.type === 'image_url') {
+        const match = part.image_url.url.match(/^data:(.+?);base64,(.+)$/)
+        if (match) {
+          return { inlineData: { mimeType: match[1], data: match[2] } }
+        }
+      }
+      return { text: part.text ?? '' }
+    })
+  }
+  return [{ text: String(content) }]
+}
