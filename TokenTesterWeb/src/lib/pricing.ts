@@ -18,6 +18,7 @@ export function flattenPricing(nested: NestedPricing = models as NestedPricing) 
   const flat: FlatPricing = {}
   for (const [provider, providerModels] of Object.entries(nested)) {
     for (const [model, pricing] of Object.entries(providerModels)) {
+      if (pricing.input < 0 || pricing.output < 0) continue
       flat[`${provider}/${model}`] = { ...pricing, per: pricing.per ?? '1M' }
     }
   }
