@@ -34,7 +34,7 @@ vercel deploy --prod --yes
 - DeepSeek and DeepSeek-routed models are treated as text-only.
 - Unsupported binary attachments are skipped before inference and count as zero tokens/cost.
 - OpenRouter PDFs are handled through OpenRouter's universal PDF parsing path.
-- xAI / Grok document runs use the Responses API and upload local files before inference.
+- xAI / Grok requests use the Responses API path in the web app.
 - The Pricing navigator is sortable and shows effective values plus underlying records.
 
 ## Documentation

@@ -42,15 +42,6 @@ function isXaiBaseUrl(baseUrl: string) {
   return baseUrl.trim().toLowerCase().includes('api.x.ai')
 }
 
-function hasXaiDocumentAttachments(messages: unknown[]) {
-  for (const message of messages as any[]) {
-    const content = message?.content
-    if (!Array.isArray(content)) continue
-    if (content.some((part: any) => part?.type === 'file')) return true
-  }
-  return false
-}
-
 export async function fetchProviderModels(params: ModelFetchParams) {
   const apiKey = process.env[params.apiKeyEnv] || ''
   if (!apiKey) return { models: [], error: `API key not found for env var "${params.apiKeyEnv}"` }
@@ -168,7 +159,7 @@ export async function chatCompletion(params: ChatParams) {
 
     switch (provider.type) {
       case 'openai-compat':
-        if (isXaiBaseUrl(provider.baseUrl) && hasXaiDocumentAttachments(messages)) {
+        if (isXaiBaseUrl(provider.baseUrl)) {
           result = await chatXaiResponses(provider.baseUrl, apiKey, model, messages, maxTokens, provider.headers)
         } else {
           result = await chatOpenAICompat(provider.baseUrl, apiKey, model, messages, maxTokens, provider.headers, params.requestBody)
