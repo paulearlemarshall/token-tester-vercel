@@ -4,6 +4,7 @@ import { useStore } from '../store'
 import type { AttachedFile, DebugEntry, FileItem, TestRun } from '../types'
 import { formatDuration, truncate } from '../utils/formatters'
 import { webApi } from '../lib/web-api'
+import { canonicalProviderKey, pricingLookupKeys, type ProviderKeyInput } from '../lib/provider-key'
 
 function buildMessages(systemPrompt: string, userMessage: string, providerType: string, file: AttachedFile | null): any[] {
   const messages: any[] = []
@@ -65,10 +66,6 @@ function retryWithCompletionTokens(body: any, maxTokens: number): any {
   delete retry.max_tokens
   retry.max_completion_tokens = maxTokens
   return retry
-}
-
-function serviceKey(providerName: string) {
-  return providerName.trim().toLowerCase().replace(/&/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '')
 }
 
 function providerKey(provider: { name: string; baseUrl: string }) {
@@ -196,8 +193,8 @@ export function RunTab() {
     })
   }
 
-  function sortedModels(providerId: string, providerName: string, models: string[]): string[] {
-    const sort = sortModes[providerName] || 'name-asc'
+  function sortedModels(providerId: string, provider: ProviderKeyInput, models: string[]): string[] {
+    const sort = sortModes[provider.name ?? providerId] || 'name-asc'
     if (sort === 'active') {
       return [...models].sort((a, b) => {
         const aSel = isModelSelected(providerId, a) ? 1 : 0
@@ -210,10 +207,10 @@ export function RunTab() {
     const sign = dir === 'asc' ? 1 : -1
     const sorted = [...models].sort((a, b) => {
       if (field === 'input') {
-        return (effectivePricing(providerName, a).input - effectivePricing(providerName, b).input) * sign
+        return (effectivePricing(provider, a).input - effectivePricing(provider, b).input) * sign
       }
       if (field === 'output') {
-        return (effectivePricing(providerName, a).output - effectivePricing(providerName, b).output) * sign
+        return (effectivePricing(provider, a).output - effectivePricing(provider, b).output) * sign
       }
       return a.localeCompare(b) * sign
     })
@@ -233,17 +230,21 @@ export function RunTab() {
     return list
   }
 
-  function effectivePricing(providerName: string, modelId: string): { input: number; output: number } {
-    const prefixed = `${serviceKey(providerName)}/${modelId}`
-    const override = modelPricing[prefixed]
-    if (override && (override.input > 0 || override.output > 0)) return override
-    if (builtinPricing[prefixed]) return { input: builtinPricing[prefixed].input, output: builtinPricing[prefixed].output }
+  function effectivePricing(provider: ProviderKeyInput | string, modelId: string): { input: number; output: number } {
+    const providerModelKeys = pricingLookupKeys(provider, modelId)
+    for (const key of providerModelKeys) {
+      const override = modelPricing[key]
+      if (override && (override.input > 0 || override.output > 0)) return override
+    }
+    for (const key of providerModelKeys) {
+      if (builtinPricing[key]) return { input: builtinPricing[key].input, output: builtinPricing[key].output }
+    }
     if (builtinPricing[modelId]) return { input: builtinPricing[modelId].input, output: builtinPricing[modelId].output }
     const short = modelId.includes('/') ? modelId.split('/').pop()! : modelId
     if (short !== modelId && builtinPricing[short]) return { input: builtinPricing[short].input, output: builtinPricing[short].output }
     const keys = Object.keys(builtinPricing).sort((a, b) => b.length - a.length)
     for (const key of keys) {
-      if (prefixed.startsWith(key)) return { input: builtinPricing[key].input, output: builtinPricing[key].output }
+      if (providerModelKeys.some(providerModelKey => providerModelKey.startsWith(key))) return { input: builtinPricing[key].input, output: builtinPricing[key].output }
       if (modelId.startsWith(key)) return { input: builtinPricing[key].input, output: builtinPricing[key].output }
       if (modelId.endsWith(`/${key}`)) return { input: builtinPricing[key].input, output: builtinPricing[key].output }
     }
@@ -302,7 +303,9 @@ export function RunTab() {
             batchFiles: tc.batchFiles,
             status: 'queued',
             timestamp: Date.now(),
-            priceOverride: modelPricing[`${serviceKey(prov.name)}/${model}`],
+            priceOverride: pricingLookupKeys(prov, model)
+              .map(key => modelPricing[key])
+              .find(price => price && (price.input > 0 || price.output > 0)),
           })
         }
       }
@@ -310,8 +313,8 @@ export function RunTab() {
     setQueue(runs)
   }
 
-  function updateModelPrice(providerName: string, modelId: string, input: number, output: number) {
-    const providerKey = serviceKey(providerName)
+  function updateModelPrice(provider: ProviderKeyInput, modelId: string, input: number, output: number) {
+    const providerKey = canonicalProviderKey(provider)
     setModelPricing(`${providerKey}/${modelId}`, input, output)
     webApi.savePricing({
       serviceProvider: providerKey,
@@ -596,7 +599,7 @@ export function RunTab() {
                 const selectedCount = getSelectedModels(prov.id, prov.models).length
                 const isExpanded = expandedProv.has(prov.id)
                 const search = searches[prov.id] || ''
-                const displayModels = sortedModels(prov.id, prov.name, filteredModels(prov.id, prov.models))
+                const displayModels = sortedModels(prov.id, prov, filteredModels(prov.id, prov.models))
                 return (
                   <div key={prov.id} className="card p-0 overflow-hidden">
                     <div className="flex items-center gap-2 px-4 py-3">
@@ -691,7 +694,7 @@ export function RunTab() {
                           displayModels.map((model: string) => {
                             const selected = isModelSelected(prov.id, model)
                             const meta = prov.modelMetas?.find((m: any) => m.id === model)
-                            const pricing = effectivePricing(prov.name, model)
+                            const pricing = effectivePricing(prov, model)
                             const lozenges = modelLozenges(prov.name, model, meta, pricing)
                             return (
                               <div
@@ -739,7 +742,7 @@ export function RunTab() {
                                       min={0}
                                       step={0.01}
                                       value={pricing.input || ''}
-                                      onChange={e => updateModelPrice(prov.name, model, parseFloat(e.target.value) || 0, pricing.output)}
+                                      onChange={e => updateModelPrice(prov, model, parseFloat(e.target.value) || 0, pricing.output)}
                                       className="w-full bg-surface-800 border border-surface-600 rounded text-[10px] px-1 py-0.5 text-surface-100 focus:outline-none focus:ring-1 focus:ring-brand-gold"
                                       placeholder="0"
                                     />
@@ -751,7 +754,7 @@ export function RunTab() {
                                       min={0}
                                       step={0.01}
                                       value={pricing.output || ''}
-                                      onChange={e => updateModelPrice(prov.name, model, pricing.input, parseFloat(e.target.value) || 0)}
+                                      onChange={e => updateModelPrice(prov, model, pricing.input, parseFloat(e.target.value) || 0)}
                                       className="w-full bg-surface-800 border border-surface-600 rounded text-[10px] px-1 py-0.5 text-surface-100 focus:outline-none focus:ring-1 focus:ring-brand-gold"
                                       placeholder="0"
                                     />

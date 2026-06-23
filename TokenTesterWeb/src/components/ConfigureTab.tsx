@@ -5,10 +5,7 @@ import { PROVIDER_PRESETS, PROVIDER_LOGOS } from '../utils/constants'
 import type { ProviderConfig, ProviderType } from '../types'
 import { webApi } from '../lib/web-api'
 import { PricingNavigator } from './PricingNavigator'
-
-function serviceKey(providerName: string) {
-  return providerName.trim().toLowerCase().replace(/&/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '')
-}
+import { canonicalProviderKey } from '../lib/provider-key'
 
 export function ConfigureTab() {
   const { config, initFromPreset, addProvider, updateProvider, removeProvider } = useStore()
@@ -278,7 +275,7 @@ export function ConfigureTab() {
                                 responseText: result.responseText || JSON.stringify(result, null, 2),
                               })
                               if (result.pricing) {
-                                const providerKey = serviceKey(prov.name)
+                                const providerKey = canonicalProviderKey(prov)
                                 for (const [modelId, p] of Object.entries(result.pricing) as [string, {input: number; output: number}][]) {
                                   const rawModel = result.rawModels?.[modelId] ?? null
                                   useStore.getState().setModelPricing(`${providerKey}/${modelId}`, p.input, p.output)
