@@ -84,6 +84,41 @@ function asTextOnlyFile(file: AttachedFile): AttachedFile {
   }
 }
 
+function modelLozenges(providerName: string, modelId: string, meta: any, pricing: { input: number; output: number }) {
+  const id = modelId.toLowerCase()
+  const provider = providerName.toLowerCase()
+  const tags: { label: string; tone: 'blue' | 'gold' | 'slate' | 'green' }[] = []
+  const add = (label: string, tone: 'blue' | 'gold' | 'slate' | 'green' = 'slate') => {
+    if (!tags.some(t => t.label === label)) tags.push({ label, tone })
+  }
+
+  if (meta?.modality?.includes('image') || /vision|image|vl|omni|gpt-4o|gemini/.test(id)) add('Vision', 'gold')
+  if (/code|coder|coding|codestral|devstral|grok-build|deepseek-coder|qwen.*coder/.test(id)) add('Coding', 'blue')
+  if (/reason|thinking|r1|o\d|grok-4|sonnet|opus/.test(id)) add('Reasoning', 'gold')
+  if (/mini|small|haiku|flash|fast|instant|lite|8b|7b/.test(id)) add('Fast', 'green')
+  if (/cheap|free|mini|small|haiku|flash|lite/.test(id) || (pricing.input > 0 && pricing.output > 0 && pricing.input <= 1 && pricing.output <= 3)) add('Low cost', 'green')
+  if ((meta?.context_length ?? 0) >= 128000 || /128k|200k|256k|1m|long/.test(id)) add('Long ctx', 'blue')
+  if (/embed/.test(id)) add('Embeddings', 'slate')
+  if (/image|imagine|dall|stable|flux/.test(id)) add('Image gen', 'gold')
+  if (provider.includes('openrouter') && id.includes('/')) add('Routed', 'slate')
+  if (tags.length === 0) add('General', 'slate')
+
+  return tags.slice(0, 4)
+}
+
+function lozengeClass(tone: 'blue' | 'gold' | 'slate' | 'green') {
+  switch (tone) {
+    case 'blue':
+      return 'border-brand-blue/35 bg-brand-blue/10 text-brand-blue dark:border-brand-blue/50 dark:bg-brand-blue/15 dark:text-surface-100'
+    case 'gold':
+      return 'border-brand-gold/45 bg-brand-gold/15 text-brand-charcoal dark:text-brand-gold'
+    case 'green':
+      return 'border-emerald-700/30 bg-emerald-700/10 text-emerald-800 dark:border-emerald-400/30 dark:bg-emerald-400/10 dark:text-emerald-300'
+    default:
+      return 'border-surface-600 bg-surface-800 text-surface-400'
+  }
+}
+
 export function RunTab() {
   const {
     config, systemPrompt, customPrompts, fileItems,
@@ -626,6 +661,7 @@ export function RunTab() {
                             const selected = isModelSelected(prov.id, model)
                             const meta = prov.modelMetas?.find((m: any) => m.id === model)
                             const pricing = effectivePricing(prov.name, model)
+                            const lozenges = modelLozenges(prov.name, model, meta, pricing)
                             return (
                               <div
                                 key={model}
@@ -652,7 +688,16 @@ export function RunTab() {
                                   <div className="text-[10px] text-surface-500 space-y-0.5">
                                     {meta?.owned_by && <p>by {meta.owned_by}</p>}
                                     {meta?.context_length && <p>ctx: {(meta.context_length / 1000).toFixed(0)}k</p>}
-                                    {meta?.modality?.includes('image') && <p className="text-brand-gold font-medium">vision</p>}
+                                  </div>
+                                  <div className="mt-2 flex flex-wrap gap-1">
+                                    {lozenges.map(tag => (
+                                      <span
+                                        key={tag.label}
+                                        className={`rounded-full border px-1.5 py-0.5 text-[9px] font-semibold leading-none ${lozengeClass(tag.tone)}`}
+                                      >
+                                        {tag.label}
+                                      </span>
+                                    ))}
                                   </div>
                                 </div>
                                 <div className="flex gap-1 mt-2" onClick={e => e.stopPropagation()}>
