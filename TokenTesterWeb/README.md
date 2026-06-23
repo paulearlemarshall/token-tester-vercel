@@ -19,7 +19,7 @@ Next.js App Router port of the Token Tester Electron app, designed for deploymen
 - `src/components/TokenTesterApp.tsx`: top-level tabbed interface.
 - `src/components/ConfigureTab.tsx`: provider setup, model discovery, fetched pricing import.
 - `src/components/PromptsTab.tsx`: prompt and file input management.
-- `src/components/RunTab.tsx`: model selection, cost fields, execution queue, and per-model price edits.
+- `src/components/RunTab.tsx`: model selection, cost fields, execution queue, unsupported attachment skips, retry actions, and per-model price edits.
 - `src/components/ResultsTab.tsx`: run results, summaries, charts, and exports.
 - `src/components/layout/Sidebar.tsx`: primary navigation.
 - `src/lib/provider-api.ts`: server-side provider model discovery and chat completion adapters.
@@ -56,6 +56,19 @@ Built-in presets are defined in `src/utils/constants.ts`.
 - xAI: `XAI_API_KEY`, OpenAI-compatible at `https://api.x.ai`.
 
 Saved browser configs that still reference the old Groq preset are migrated in `src/store.ts` to xAI with `XAI_API_KEY`.
+
+## File and Document Handling
+
+Uploads are parsed in `src/lib/browser-files.ts` and queued in `src/components/RunTab.tsx`.
+
+- Text files are sent as text message parts.
+- Images are sent as image parts when the provider adapter supports image-style content.
+- PDFs and DOCX files are classified as `document` attachments and are only sent to providers that the app explicitly treats as document-capable.
+- Unsupported attachments are marked `skipped` before inference. Skipped runs record zero input tokens, zero output tokens, zero latency, and zero cost.
+- If a provider rejects a file, image, or document payload, the run is marked `skipped`; the app must not retry with a placeholder such as `[.PDF file]`, because that encourages hallucinated answers.
+- DeepSeek providers and DeepSeek-routed models are treated as text-only and skip PDFs, DOCX files, and images.
+- Generic OpenAI-compatible providers are conservative by default. OpenAI's own API is treated as document-capable; other OpenAI-compatible gateways should be explicitly allowed only after their request schema is verified.
+- Queue rows with `error` status can be retried individually. Queue rows with `skipped` status are informational and are not retried, because the input is known to be unsupported.
 
 ## Pricing
 
