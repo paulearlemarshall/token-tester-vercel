@@ -23,10 +23,10 @@ export function ResultsTab() {
   const [sortField, setSortField] = useState<SortField | null>(null)
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc')
 
-  const results = queue.filter(r => r.status === 'success' || r.status === 'error')
+  const results = queue.filter(r => r.status === 'success' || r.status === 'error' || r.status === 'skipped')
 
   const completed = results.filter(r => r.status === 'success')
-  const failed = results.filter(r => r.status === 'error')
+  const skipped = results.filter(r => r.status === 'skipped')
 
   function lookupBuiltin(model: string): PriceEntry | null {
     if (builtinPricing[model]) return builtinPricing[model]
@@ -178,8 +178,8 @@ export function ResultsTab() {
     arr.sort((a, b) => {
       const rateA = getRate(a)
       const rateB = getRate(b)
-      const costA = estimateCost(a.result?.inputTokens ?? 0, a.result?.outputTokens ?? 0, rateA)
-      const costB = estimateCost(b.result?.inputTokens ?? 0, b.result?.outputTokens ?? 0, rateB)
+      const costA = a.status === 'skipped' ? 0 : estimateCost(a.result?.inputTokens ?? 0, a.result?.outputTokens ?? 0, rateA)
+      const costB = b.status === 'skipped' ? 0 : estimateCost(b.result?.inputTokens ?? 0, b.result?.outputTokens ?? 0, rateB)
       let cmp = 0
       switch (sortField) {
         case 'provider': cmp = (a.providerName || '').localeCompare(b.providerName || ''); break
@@ -276,7 +276,7 @@ export function ResultsTab() {
       'Input Tokens': r.result?.inputTokens ?? 0,
       'Output Tokens': r.result?.outputTokens ?? 0,
       'Total Tokens': r.result?.totalTokens ?? 0,
-      'Latency (ms)': r.result?.latencyMs ?? 0,
+      'Latency (ms)': r.status === 'skipped' ? 0 : (r.result?.latencyMs ?? 0),
       Error: r.result?.error ?? '',
     }))
     const ws = XLSX.utils.json_to_sheet(data)
@@ -336,7 +336,7 @@ export function ResultsTab() {
         </div>
       </div>
 
-      <div className="grid grid-cols-5 gap-3">
+      <div className="grid grid-cols-6 gap-3">
         <div className="card">
           <div className="flex items-center gap-2 text-surface-400 text-xs mb-1">
             <CheckCircle size={14} /> Completed
@@ -361,6 +361,12 @@ export function ResultsTab() {
             <Clock size={14} /> Avg Latency
           </div>
           <p className="text-2xl font-bold text-surface-100">{formatDuration(avgLatency)}</p>
+        </div>
+        <div className="card">
+          <div className="flex items-center gap-2 text-surface-400 text-xs mb-1">
+            <Clock size={14} /> Skipped
+          </div>
+          <p className="text-2xl font-bold text-surface-100">{skipped.length}</p>
         </div>
         <div className="card">
           <div className="flex items-center gap-2 text-surface-400 text-xs mb-1">
@@ -394,7 +400,7 @@ export function ResultsTab() {
               <tbody>
                 {sortedResults.map(r => {
                   const rate = getRate(r)
-                  const cost = estimateCost(r.result?.inputTokens ?? 0, r.result?.outputTokens ?? 0, rate)
+                  const cost = r.status === 'skipped' ? 0 : estimateCost(r.result?.inputTokens ?? 0, r.result?.outputTokens ?? 0, rate)
                   return (
                     <tr
                       key={r.id}
@@ -411,7 +417,9 @@ export function ResultsTab() {
                       <td className="px-4 py-2 text-right font-mono text-xs text-emerald-400">{formatCurrency(cost)}</td>
                       <td className="px-4 py-2 text-right font-mono text-xs text-surface-300">{r.result?.latencyMs ? formatDuration(r.result.latencyMs) : '—'}</td>
                       <td className="px-4 py-2 text-center">
-                        {r.status === 'success' ? <CheckCircle size={14} className="inline text-emerald-400" /> : <XCircle size={14} className="inline text-red-400" />}
+                        {r.status === 'success' && <CheckCircle size={14} className="inline text-emerald-400" />}
+                        {r.status === 'error' && <XCircle size={14} className="inline text-red-400" />}
+                        {r.status === 'skipped' && <Clock size={14} className="inline text-surface-400" />}
                       </td>
                       <td className="px-4 py-2 text-right font-mono text-xs text-surface-300">{r.file ? formatFileSize(r.file.size) : '—'}</td>
                       <td className="px-4 py-2 text-left font-mono text-xs text-surface-300">{getFileMeta(r.file) || '—'}</td>
@@ -648,15 +656,15 @@ export function ResultsTab() {
                   <div><span className="text-surface-400">Provider:</span> <span className="text-surface-200">{r.providerName}</span></div>
                   <div><span className="text-surface-400">Model:</span> <span className="text-surface-200">{r.model}</span></div>
                   <div><span className="text-surface-400">File:</span> <span className="text-surface-200">{r.file?.name ?? '—'}</span></div>
-                  <div><span className="text-surface-400">Status:</span> <span className={r.status === 'success' ? 'text-emerald-400' : 'text-red-400'}>{r.status}</span></div>
+                  <div><span className="text-surface-400">Status:</span> <span className={r.status === 'success' ? 'text-emerald-400' : r.status === 'skipped' ? 'text-surface-400' : 'text-red-400'}>{r.status}</span></div>
                   <div><span className="text-surface-400">Input Tokens:</span> <span className="text-surface-200">{formatNumber(r.result?.inputTokens ?? 0)}</span></div>
                   <div><span className="text-surface-400">Output Tokens:</span> <span className="text-surface-200">{formatNumber(r.result?.outputTokens ?? 0)}</span></div>
                   <div><span className="text-surface-400">Total Tokens:</span> <span className="text-surface-200">{formatNumber(r.result?.totalTokens ?? 0)}</span></div>
                   <div><span className="text-surface-400">Latency:</span> <span className="text-surface-200">{formatDuration(r.result?.latencyMs ?? 0)}</span></div>
                 </div>
                 {r.result?.error && (
-                  <div className="bg-red-900/30 border border-red-800 rounded p-3">
-                    <p className="text-red-400 text-xs font-mono whitespace-pre-wrap">{r.result.error}</p>
+                  <div className={`rounded border p-3 ${r.status === 'skipped' ? 'border-surface-700 bg-surface-900' : 'border-red-800 bg-red-900/30'}`}>
+                    <p className={`text-xs font-mono whitespace-pre-wrap ${r.status === 'skipped' ? 'text-surface-300' : 'text-red-400'}`}>{r.result.error}</p>
                   </div>
                 )}
                 <div>

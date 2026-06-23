@@ -73,7 +73,7 @@ export interface TestRun {
   userMessage: string
   file: AttachedFile | null
   batchFiles?: AttachedFile[]
-  status: 'queued' | 'running' | 'success' | 'error'
+  status: 'queued' | 'running' | 'success' | 'error' | 'skipped'
   result?: ChatResult
   localInputTokens?: number
   timestamp: number

@@ -75,15 +75,6 @@ function providerRequiresTextOnlyParts(provider: { name: string; baseUrl: string
   return provider.name.toLowerCase().includes('deepseek') || provider.baseUrl.toLowerCase().includes('api.deepseek.com')
 }
 
-function asTextOnlyFile(file: AttachedFile): AttachedFile {
-  if (file.type === 'text') return file
-  return {
-    ...file,
-    type: 'text',
-    content: file.content || `[${file.ext.toUpperCase()} file: ${file.name} omitted because this provider only accepts text message parts]`,
-  }
-}
-
 function modelLozenges(providerName: string, modelId: string, meta: any, pricing: { input: number; output: number }) {
   const id = modelId.toLowerCase()
   const provider = providerName.toLowerCase()
@@ -117,6 +108,18 @@ function lozengeClass(tone: 'blue' | 'gold' | 'slate' | 'green') {
     default:
       return 'border-surface-600 bg-surface-800 text-surface-400'
   }
+}
+
+function unsupportedAttachmentReason(provider: { name: string; baseUrl: string }, run: TestRun) {
+  if (!providerRequiresTextOnlyParts(provider)) return null
+  const files = run.sourceType === 'batch'
+    ? (run.batchFiles ?? [])
+    : (run.file ? [run.file] : [])
+  const unsupported = files.filter(file => file.type !== 'text')
+  if (unsupported.length === 0) return null
+  const names = unsupported.slice(0, 3).map(file => file.name).join(', ')
+  const suffix = unsupported.length > 3 ? `, and ${unsupported.length - 3} more` : ''
+  return `${provider.name} only supports text message parts; skipped unsupported attachment${unsupported.length !== 1 ? 's' : ''}: ${names}${suffix}`
 }
 
 export function RunTab() {
@@ -312,13 +315,20 @@ export function RunTab() {
       return
     }
 
+    const skipReason = unsupportedAttachmentReason(prov, run)
+    if (skipReason) {
+      updateRun(run.id, {
+        status: 'skipped',
+        result: { inputTokens: 0, outputTokens: 0, totalTokens: 0, responseText: '', latencyMs: 0, error: skipReason },
+      })
+      setProgress((p: any) => ({ ...p, completed: p.completed + 1 }))
+      return
+    }
+
     try {
-      const textOnlyParts = providerRequiresTextOnlyParts(prov)
-      const initialFile = textOnlyParts && run.file ? asTextOnlyFile(run.file) : run.file
-      const initialBatchFiles = textOnlyParts ? run.batchFiles?.map(asTextOnlyFile) : run.batchFiles
-      let messages = run.sourceType === 'batch' && initialBatchFiles
-        ? buildBatchMessages(run.systemPrompt, run.userMessage, initialBatchFiles)
-        : buildMessages(run.systemPrompt, run.userMessage, prov.type, initialFile)
+      let messages = run.sourceType === 'batch' && run.batchFiles
+        ? buildBatchMessages(run.systemPrompt, run.userMessage, run.batchFiles)
+        : buildMessages(run.systemPrompt, run.userMessage, prov.type, run.file)
       let bodyPayload = buildRequestBody(prov.type, run.model, messages, 4096)
 
       let result = await webApi.chatCompletion({
@@ -431,9 +441,8 @@ export function RunTab() {
 
   const successCount = queue.filter((r: any) => r.status === 'success').length
   const errorCount = queue.filter((r: any) => r.status === 'error').length
+  const skippedCount = queue.filter((r: any) => r.status === 'skipped').length
   const queuedCount = queue.filter((r: any) => r.status === 'queued').length
-
-  const entry = debugEntries.length > 0 ? debugEntries[outputIndex] : null
 
   const filteredDebugEntries = debugEntries.filter(e =>
     (filterModel ? e.model === filterModel : true) &&
@@ -537,7 +546,7 @@ export function RunTab() {
             </div>
           </div>
 
-          {successCount + errorCount > 0 && (
+          {successCount + errorCount + skippedCount > 0 && (
             <div className="flex gap-4">
               <div className="card flex items-center gap-2 px-4 py-2">
                 <CheckCircle size={18} className="text-emerald-400" />
@@ -546,6 +555,10 @@ export function RunTab() {
               <div className="card flex items-center gap-2 px-4 py-2">
                 <XCircle size={18} className={errorCount > 0 ? 'text-red-400' : 'text-surface-500'} />
                 <span className="text-sm text-surface-200">{errorCount} failed</span>
+              </div>
+              <div className="card flex items-center gap-2 px-4 py-2">
+                <Clock size={18} className={skippedCount > 0 ? 'text-surface-400' : 'text-surface-500'} />
+                <span className="text-sm text-surface-200">{skippedCount} skipped</span>
               </div>
               <div className="card flex items-center gap-2 px-4 py-2">
                 <Clock size={18} className="text-surface-400" />
@@ -748,6 +761,7 @@ export function RunTab() {
                     {run.status === 'running' && <Loader2 size={14} className="text-brand-gold animate-spin shrink-0" />}
                     {run.status === 'success' && <CheckCircle size={14} className="text-emerald-400 shrink-0" />}
                     {run.status === 'error' && <XCircle size={14} className="text-red-400 shrink-0" />}
+                    {run.status === 'skipped' && <Clock size={14} className="text-surface-400 shrink-0" />}
                     <span className="text-xs font-mono text-brand-gold w-20 shrink-0 truncate">{run.providerName}</span>
                     <span className="text-xs font-mono text-surface-300 w-28 shrink-0 truncate">{run.model}</span>
                   <span className="text-xs text-surface-400 truncate flex-1">
@@ -768,7 +782,7 @@ export function RunTab() {
                       </span>
                     )}
                     {run.result?.error && (
-                      <span className="text-xs text-red-400 truncate max-w-[150px] shrink-0" title={run.result.error}>
+                      <span className={`text-xs truncate max-w-[150px] shrink-0 ${run.status === 'skipped' ? 'text-surface-400' : 'text-red-400'}`} title={run.result.error}>
                         {truncate(run.result.error, 40)}
                       </span>
                     )}
