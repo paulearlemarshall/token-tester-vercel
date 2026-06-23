@@ -38,6 +38,19 @@ function centsPer100mToUsdPer1m(value: unknown) {
   return value / 10_000
 }
 
+function isXaiBaseUrl(baseUrl: string) {
+  return baseUrl.trim().toLowerCase().includes('api.x.ai')
+}
+
+function hasXaiDocumentAttachments(messages: unknown[]) {
+  for (const message of messages as any[]) {
+    const content = message?.content
+    if (!Array.isArray(content)) continue
+    if (content.some((part: any) => part?.type === 'file')) return true
+  }
+  return false
+}
+
 export async function fetchProviderModels(params: ModelFetchParams) {
   const apiKey = process.env[params.apiKeyEnv] || ''
   if (!apiKey) return { models: [], error: `API key not found for env var "${params.apiKeyEnv}"` }
@@ -155,7 +168,11 @@ export async function chatCompletion(params: ChatParams) {
 
     switch (provider.type) {
       case 'openai-compat':
-        result = await chatOpenAICompat(provider.baseUrl, apiKey, model, messages, maxTokens, provider.headers, params.requestBody)
+        if (isXaiBaseUrl(provider.baseUrl) && hasXaiDocumentAttachments(messages)) {
+          result = await chatXaiResponses(provider.baseUrl, apiKey, model, messages, maxTokens, provider.headers)
+        } else {
+          result = await chatOpenAICompat(provider.baseUrl, apiKey, model, messages, maxTokens, provider.headers, params.requestBody)
+        }
         break
       case 'anthropic':
         result = await chatAnthropic(apiKey, model, messages, maxTokens)
@@ -178,6 +195,141 @@ export async function chatCompletion(params: ChatParams) {
       latencyMs: Math.round(performance.now() - start),
       error: err.message ?? String(err),
     }
+  }
+}
+
+function parseXaiResponseText(data: any): string {
+  const lastMessage = Array.isArray(data?.output) ? data.output.at(-1) : null
+  const content = Array.isArray(lastMessage?.content) ? lastMessage.content : []
+  const textPart = content.find((part: any) => part?.type === 'output_text' && typeof part.text === 'string')
+  return textPart?.text ?? ''
+}
+
+function parseXaiUsage(data: any) {
+  const inputTokens = data?.usage?.input_tokens ?? data?.usage?.prompt_tokens ?? 0
+  const outputTokens = data?.usage?.output_tokens ?? data?.usage?.completion_tokens ?? 0
+  const totalTokens = data?.usage?.total_tokens ?? (inputTokens + outputTokens)
+  return { inputTokens, outputTokens, totalTokens }
+}
+
+async function uploadXaiFile(
+  baseUrl: string,
+  apiKey: string,
+  filename: string,
+  mimeType: string,
+  base64Data: string,
+  extraHeaders?: string
+): Promise<string> {
+  const uploadUrl = `${baseUrl.replace(/\/+$/, '')}/v1/files`
+  const body = new FormData()
+  body.append('file', new Blob([Buffer.from(base64Data, 'base64')], { type: mimeType }), filename)
+  const extra = parseHeaders(extraHeaders)
+  const res = await fetch(uploadUrl, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${apiKey}`, ...extra },
+    body,
+  })
+  if (!res.ok) {
+    const text = await res.text()
+    throw new Error(`${res.status} ${res.statusText}: ${text.slice(0, 500)}`)
+  }
+  const data = await res.json()
+  if (!data?.id) throw new Error('xAI file upload did not return a file id')
+  return data.id
+}
+
+async function buildXaiResponsesInput(
+  messages: unknown[],
+  baseUrl: string,
+  apiKey: string,
+  extraHeaders?: string
+): Promise<any[]> {
+  const fileIdCache = new Map<string, Promise<string>>()
+  const input: any[] = []
+
+  for (const message of messages as any[]) {
+    const role = message?.role === 'assistant' ? 'assistant' : message?.role === 'system' ? 'system' : 'user'
+    const content = message?.content
+    if (typeof content === 'string') {
+      input.push({ role, content })
+      continue
+    }
+
+    if (!Array.isArray(content)) {
+      input.push({ role, content: String(content ?? '') })
+      continue
+    }
+
+    const parts: any[] = []
+    for (const part of content) {
+      if (part?.type === 'text' && typeof part.text === 'string') {
+        parts.push({ type: 'input_text', text: part.text })
+        continue
+      }
+
+      if (part?.type === 'file' && typeof part.file?.file_data === 'string') {
+        const match = part.file.file_data.match(/^data:(.+?);base64,(.+)$/)
+        if (!match) throw new Error('xAI file attachments must be base64 data URLs')
+        const mimeType = match[1]
+        const base64Data = match[2]
+        const filename = part.file.filename || 'attachment'
+        const cacheKey = `${filename}:${mimeType}:${base64Data.length}:${base64Data.slice(0, 32)}`
+        let uploadPromise = fileIdCache.get(cacheKey)
+        if (!uploadPromise) {
+          uploadPromise = uploadXaiFile(baseUrl, apiKey, filename, mimeType, base64Data, extraHeaders)
+          fileIdCache.set(cacheKey, uploadPromise)
+        }
+        const fileId = await uploadPromise
+        parts.push({ type: 'input_file', file_id: fileId })
+        continue
+      }
+
+      if (part?.type === 'image_url' && typeof part.image_url?.url === 'string') {
+        parts.push({ type: 'input_image', image_url: part.image_url.url })
+        continue
+      }
+
+      if (part?.text) {
+        parts.push({ type: 'input_text', text: String(part.text) })
+      }
+    }
+
+    input.push(parts.length > 0 ? { role, content: parts } : { role, content: '' })
+  }
+
+  return input
+}
+
+async function chatXaiResponses(
+  baseUrl: string,
+  apiKey: string,
+  model: string,
+  messages: unknown[],
+  maxTokens: number,
+  extraHeaders?: string
+): Promise<ApiResult> {
+  const url = `${baseUrl.replace(/\/+$/, '')}/v1/responses`
+  const input = await buildXaiResponsesInput(messages, baseUrl, apiKey, extraHeaders)
+  const extra = parseHeaders(extraHeaders)
+
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}`, ...extra },
+    body: JSON.stringify({ model, input, max_output_tokens: maxTokens }),
+  })
+
+  if (!res.ok) {
+    const text = await res.text()
+    throw new Error(`${res.status} ${res.statusText}: ${text.slice(0, 500)}`)
+  }
+
+  const data = await res.json()
+  const { inputTokens, outputTokens, totalTokens } = parseXaiUsage(data)
+  return {
+    inputTokens,
+    outputTokens,
+    totalTokens,
+    responseText: parseXaiResponseText(data),
   }
 }
 

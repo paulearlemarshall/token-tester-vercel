@@ -102,7 +102,7 @@ Uploads are parsed in `src/lib/browser-files.ts` and queued in `src/components/R
 - Images are sent as image parts when the provider capability helper says the provider supports them.
 - PDFs and DOCX files are classified as `document` attachments and are only sent to providers that the app explicitly treats as document-capable.
 - OpenRouter is treated as document-capable because it exposes a universal PDF handler and can parse PDFs even when the downstream model does not natively accept file input.
-- xAI / Grok is treated as document-capable as well; the xAI files docs cover PDF attachments, file upload, and chat with files.
+- xAI / Grok is treated as document-capable as well; document runs are routed through xAI `/v1/responses` with file upload, because the legacy chat-completions path is text/image only.
 - Unsupported attachments are marked `skipped` before inference. Skipped runs record zero input tokens, zero output tokens, zero latency, and zero cost.
 - If a provider rejects a file, image, or document payload, the run is marked `skipped`; the app must not retry with a placeholder such as `[.PDF file]`.
 - DeepSeek providers and DeepSeek-routed models are treated as text-only and skip PDFs, DOCX files, and images.
