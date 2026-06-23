@@ -10,14 +10,76 @@ export interface ModelPriceInput {
   upstreamProvider?: string | null
   displayName?: string | null
   source?: string
+  sourcePriority?: number
+  sourceUrl?: string | null
+  sourceUpdatedAt?: string | null
+  rawSourcePayload?: unknown
+  rawProviderPayload?: unknown
+  matchStatus?: string
+  matchConfidence?: number | null
+  matchMethod?: string | null
+  matchEvidence?: unknown
+}
+
+export interface PriceRecord {
+  id?: number
+  key: string
+  serviceProvider: string
+  modelId: string
+  upstreamProvider: string | null
+  displayName: string | null
+  input: number
+  output: number
+  currency: string
+  source: string
+  sourcePriority: number
+  sourceUrl: string | null
+  sourceUpdatedAt: string | null
+  rawSourcePayload: unknown
+  rawProviderPayload: unknown
+  matchStatus: string
+  matchConfidence: number | null
+  matchMethod: string | null
+  matchEvidence: unknown
+  updatedAt: string
+  lastSeenAt: string
 }
 
 export async function getPricing() {
   const sql = getSql()
   const rows = await sql`
-    select service_provider, model_id, input_per_1m, output_per_1m
-    from model_prices
-    order by service_provider, model_id
+    with candidates as (
+      select
+        service_provider,
+        model_id,
+        input_per_1m,
+        output_per_1m,
+        source_priority,
+        updated_at
+      from model_price_records
+      union all
+      select
+        service_provider,
+        model_id,
+        input_per_1m,
+        output_per_1m,
+        0 as source_priority,
+        updated_at
+      from model_prices
+      where not exists (
+        select 1
+        from model_price_records r
+        where r.service_provider = model_prices.service_provider
+          and r.model_id = model_prices.model_id
+      )
+    )
+    select distinct on (service_provider, model_id)
+      service_provider,
+      model_id,
+      input_per_1m,
+      output_per_1m
+    from candidates
+    order by service_provider, model_id, source_priority desc, updated_at desc
   `
   const dbPricing: FlatPricing = {}
   for (const row of rows as any[]) {
@@ -30,6 +92,97 @@ export async function getPricing() {
   return dbPricing
 }
 
+export async function getPricingRecords() {
+  const sql = getSql()
+  const rows = await sql`
+    with records as (
+      select
+        id,
+        service_provider,
+        model_id,
+        upstream_provider,
+        display_name,
+        input_per_1m,
+        output_per_1m,
+        currency,
+        source,
+        source_priority,
+        source_url,
+        source_updated_at,
+        raw_source_payload,
+        raw_provider_payload,
+        match_status,
+        match_confidence,
+        match_method,
+        match_evidence,
+        updated_at,
+        last_seen_at
+      from model_price_records
+      union all
+      select
+        null as id,
+        service_provider,
+        model_id,
+        upstream_provider,
+        display_name,
+        input_per_1m,
+        output_per_1m,
+        currency,
+        source,
+        0 as source_priority,
+        null as source_url,
+        null as source_updated_at,
+        null::jsonb as raw_source_payload,
+        null::jsonb as raw_provider_payload,
+        'legacy' as match_status,
+        null::numeric as match_confidence,
+        'legacy-model_prices' as match_method,
+        null::jsonb as match_evidence,
+        updated_at,
+        updated_at as last_seen_at
+      from model_prices
+      where not exists (
+        select 1
+        from model_price_records r
+        where r.service_provider = model_prices.service_provider
+          and r.model_id = model_prices.model_id
+      )
+    ),
+    ranked as (
+      select
+        *,
+        row_number() over (
+          partition by service_provider, model_id
+          order by source_priority desc, updated_at desc
+        ) as rank
+      from records
+    )
+    select *
+    from ranked
+    order by service_provider, model_id, source_priority desc, updated_at desc
+  `
+
+  const groups = new Map<string, { key: string; provider: string; model: string; effective: PriceRecord | null; records: PriceRecord[] }>()
+  for (const row of rows as any[]) {
+    const record = rowToPriceRecord(row)
+    const group = groups.get(record.key) ?? {
+      key: record.key,
+      provider: record.serviceProvider,
+      model: record.modelId,
+      effective: null,
+      records: [],
+    }
+    if (Number(row.rank) === 1) group.effective = record
+    group.records.push(record)
+    groups.set(record.key, group)
+  }
+
+  return {
+    records: Array.from(groups.values()),
+    generatedAt: new Date().toISOString(),
+  }
+}
+
 export async function upsertModelPrice(input: ModelPriceInput) {
   const serviceProvider = normalizeServiceProvider(input.serviceProvider)
   const modelId = input.modelId.trim()
@@ -40,7 +193,79 @@ export async function upsertModelPrice(input: ModelPriceInput) {
     throw new Error('input and output prices must be non-negative numbers')
   }
 
+  const source = input.source ?? 'manual'
+  const sourcePriority = input.sourcePriority ?? priorityForSource(source)
+  const upstreamProvider = input.upstreamProvider ?? inferUpstreamProvider(serviceProvider, modelId)
+  const displayName = input.displayName ?? modelId
+  const matchEvidence = input.matchEvidence ?? buildMatchEvidence({
+    serviceProvider,
+    modelId,
+    source,
+    sourceProvider: upstreamProvider,
+    sourceModelId: modelId,
+    matchMethod: input.matchMethod ?? 'exact-id',
+  })
+
   const sql = getSql()
+  await sql`
+    insert into model_price_records (
+      service_provider,
+      model_id,
+      upstream_provider,
+      display_name,
+      input_per_1m,
+      output_per_1m,
+      source,
+      source_priority,
+      source_url,
+      source_updated_at,
+      raw_source_payload,
+      raw_provider_payload,
+      match_status,
+      match_confidence,
+      match_method,
+      match_evidence,
+      updated_at,
+      last_seen_at
+    )
+    values (
+      ${serviceProvider},
+      ${modelId},
+      ${upstreamProvider},
+      ${displayName},
+      ${input.input},
+      ${input.output},
+      ${source},
+      ${sourcePriority},
+      ${input.sourceUrl ?? null},
+      ${input.sourceUpdatedAt ?? null},
+      ${jsonOrNull(input.rawSourcePayload)}::jsonb,
+      ${jsonOrNull(input.rawProviderPayload)}::jsonb,
+      ${input.matchStatus ?? 'matched'},
+      ${input.matchConfidence ?? 1},
+      ${input.matchMethod ?? 'exact-id'},
+      ${JSON.stringify(matchEvidence)}::jsonb,
+      now(),
+      now()
+    )
+    on conflict (service_provider, model_id, source) do update set
+      upstream_provider = excluded.upstream_provider,
+      display_name = excluded.display_name,
+      input_per_1m = excluded.input_per_1m,
+      output_per_1m = excluded.output_per_1m,
+      source_priority = excluded.source_priority,
+      source_url = excluded.source_url,
+      source_updated_at = excluded.source_updated_at,
+      raw_source_payload = excluded.raw_source_payload,
+      raw_provider_payload = excluded.raw_provider_payload,
+      match_status = excluded.match_status,
+      match_confidence = excluded.match_confidence,
+      match_method = excluded.match_method,
+      match_evidence = excluded.match_evidence,
+      updated_at = now(),
+      last_seen_at = now()
+  `
+
   await sql`
     insert into model_prices (
       service_provider,
@@ -55,11 +280,11 @@ export async function upsertModelPrice(input: ModelPriceInput) {
     values (
       ${serviceProvider},
       ${modelId},
-      ${input.upstreamProvider ?? inferUpstreamProvider(serviceProvider, modelId)},
-      ${input.displayName ?? modelId},
+      ${upstreamProvider},
+      ${displayName},
       ${input.input},
       ${input.output},
-      ${input.source ?? 'manual'},
+      ${source},
       now()
     )
     on conflict (service_provider, model_id) do update set
@@ -70,6 +295,7 @@ export async function upsertModelPrice(input: ModelPriceInput) {
       source = excluded.source,
       updated_at = now()
   `
+
   return {
     key: `${serviceProvider}/${modelId}`,
     price: { input: input.input, output: input.output, per: '1M' },
@@ -85,4 +311,83 @@ export function inferUpstreamProvider(serviceProvider: string, modelId: string) 
     return modelId.split('/')[0]
   }
   return serviceProvider
+}
+
+export function priorityForSource(source: string) {
+  switch (source) {
+    case 'provider-discovery':
+      return 100
+    case 'manual':
+      return 50
+    case 'llm-prices':
+      return 10
+    default:
+      return 0
+  }
+}
+
+export function buildMatchEvidence(input: {
+  serviceProvider: string
+  modelId: string
+  source: string
+  sourceProvider?: string | null
+  sourceModelId?: string | null
+  matchMethod?: string | null
+}) {
+  const normalizedProvider = normalizeServiceProvider(input.serviceProvider)
+  const normalizedSourceProvider = normalizeServiceProvider(input.sourceProvider ?? input.serviceProvider)
+  const normalizedModelId = normalizeModelId(input.modelId)
+  const normalizedSourceModelId = normalizeModelId(input.sourceModelId ?? input.modelId)
+
+  return {
+    source: input.source,
+    compared: {
+      provider: input.serviceProvider,
+      modelId: input.modelId,
+      sourceProvider: input.sourceProvider ?? input.serviceProvider,
+      sourceModelId: input.sourceModelId ?? input.modelId,
+      normalizedProvider,
+      normalizedSourceProvider,
+      normalizedModelId,
+      normalizedSourceModelId,
+    },
+    method: input.matchMethod ?? 'exact-id',
+    providerMatched: normalizedProvider === normalizedSourceProvider,
+    modelMatched: normalizedModelId === normalizedSourceModelId,
+  }
+}
+
+function normalizeModelId(value: string) {
+  return value.trim().toLowerCase().replace(/^models\//, '')
+}
+
+function jsonOrNull(value: unknown) {
+  if (value == null) return null
+  return JSON.stringify(value)
+}
+
+function rowToPriceRecord(row: any): PriceRecord {
+  return {
+    id: row.id == null ? undefined : Number(row.id),
+    key: `${row.service_provider}/${row.model_id}`,
+    serviceProvider: row.service_provider,
+    modelId: row.model_id,
+    upstreamProvider: row.upstream_provider,
+    displayName: row.display_name,
+    input: Number(row.input_per_1m),
+    output: Number(row.output_per_1m),
+    currency: row.currency,
+    source: row.source,
+    sourcePriority: Number(row.source_priority),
+    sourceUrl: row.source_url,
+    sourceUpdatedAt: row.source_updated_at ? new Date(row.source_updated_at).toISOString() : null,
+    rawSourcePayload: row.raw_source_payload,
+    rawProviderPayload: row.raw_provider_payload,
+    matchStatus: row.match_status,
+    matchConfidence: row.match_confidence == null ? null : Number(row.match_confidence),
+    matchMethod: row.match_method,
+    matchEvidence: row.match_evidence,
+    updatedAt: new Date(row.updated_at).toISOString(),
+    lastSeenAt: new Date(row.last_seen_at).toISOString(),
+  }
 }

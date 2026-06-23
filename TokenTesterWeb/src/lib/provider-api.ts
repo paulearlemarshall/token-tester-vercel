@@ -63,6 +63,7 @@ export async function fetchProviderModels(params: ModelFetchParams) {
         context_length: m.context_length,
         modality: m.architecture?.modality,
       }))
+      const rawModelsById = Object.fromEntries(rawModels.map((m: any) => [m.id, m]))
       const pricing: Record<string, { input: number; output: number }> = {}
       for (const m of rawModels) {
         if (m.pricing?.prompt != null || m.pricing?.completion != null) {
@@ -85,6 +86,7 @@ export async function fetchProviderModels(params: ModelFetchParams) {
       return {
         models,
         modelMetas: modelMetas.length > 0 ? modelMetas : undefined,
+        rawModels: rawModelsById,
         pricing: Object.keys(pricing).length > 0 ? pricing : undefined,
         responseText: JSON.stringify(data, null, 2),
       }

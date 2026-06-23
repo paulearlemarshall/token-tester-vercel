@@ -4,6 +4,7 @@ import { useStore } from '../store'
 import { PROVIDER_PRESETS, PROVIDER_LOGOS } from '../utils/constants'
 import type { ProviderConfig, ProviderType } from '../types'
 import { webApi } from '../lib/web-api'
+import { PricingNavigator } from './PricingNavigator'
 
 function serviceKey(providerName: string) {
   return providerName.trim().toLowerCase().replace(/&/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '')
@@ -23,6 +24,7 @@ export function ConfigureTab() {
   }>(null)
   const [responseCollapsed, setResponseCollapsed] = useState(true)
   const [copiedResponse, setCopiedResponse] = useState(false)
+  const [showPricingNavigator, setShowPricingNavigator] = useState(false)
   const responseJson = (() => {
     if (!fetchDialog?.responseText) return null
     try {
@@ -117,9 +119,13 @@ export function ConfigureTab() {
             <FileEdit size={14} />
             Vercel Env
           </button>
-          <button className="btn-secondary text-xs flex items-center gap-1.5" title="Pricing overrides are stored in browser local storage.">
+          <button
+            onClick={() => setShowPricingNavigator(true)}
+            className="btn-secondary text-xs flex items-center gap-1.5"
+            title="Inspect provider/model prices, source context, and matching evidence."
+          >
             <DollarSign size={14} />
-            Local Pricing
+            Pricing
           </button>
           <button onClick={() => setShowAdd(!showAdd)} className="btn-primary flex items-center gap-2">
             <Plus size={16} /> Add Provider
@@ -274,6 +280,7 @@ export function ConfigureTab() {
                               if (result.pricing) {
                                 const providerKey = serviceKey(prov.name)
                                 for (const [modelId, p] of Object.entries(result.pricing) as [string, {input: number; output: number}][]) {
+                                  const rawModel = result.rawModels?.[modelId] ?? null
                                   useStore.getState().setModelPricing(`${providerKey}/${modelId}`, p.input, p.output)
                                   webApi.savePricing({
                                     serviceProvider: providerKey,
@@ -281,6 +288,25 @@ export function ConfigureTab() {
                                     input: p.input,
                                     output: p.output,
                                     displayName: modelId,
+                                    source: 'provider-discovery',
+                                    sourcePriority: 100,
+                                    rawProviderPayload: rawModel ?? {
+                                      provider: prov.name,
+                                      baseUrl: prov.baseUrl,
+                                      modelId,
+                                      pricing: p,
+                                    },
+                                    matchStatus: 'matched',
+                                    matchConfidence: 1,
+                                    matchMethod: 'provider-model-id',
+                                    matchEvidence: {
+                                      source: 'provider-discovery',
+                                      provider: prov.name,
+                                      serviceProvider: providerKey,
+                                      modelId,
+                                      providerModelId: modelId,
+                                      reason: 'Price came from the same provider model discovery row used to populate the model list.',
+                                    },
                                   }).catch(err => console.error('Failed to save fetched pricing', err))
                                 }
                               }
@@ -421,6 +447,7 @@ export function ConfigureTab() {
           </div>
         </div>
       )}
+      {showPricingNavigator && <PricingNavigator onClose={() => setShowPricingNavigator(false)} />}
     </div>
   )
 }

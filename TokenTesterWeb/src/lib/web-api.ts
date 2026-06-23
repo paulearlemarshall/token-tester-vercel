@@ -29,6 +29,12 @@ export const webApi = {
     return res.json()
   },
 
+  async getPricingRecords() {
+    const res = await fetch('/api/pricing/records')
+    if (!res.ok) return { records: [] }
+    return res.json()
+  },
+
   async savePricing(params: {
     serviceProvider: string
     modelId: string
@@ -36,10 +42,20 @@ export const webApi = {
     output: number
     upstreamProvider?: string | null
     displayName?: string | null
+    source?: string
+    sourcePriority?: number
+    sourceUrl?: string | null
+    sourceUpdatedAt?: string | null
+    rawSourcePayload?: unknown
+    rawProviderPayload?: unknown
+    matchStatus?: string
+    matchConfidence?: number | null
+    matchMethod?: string | null
+    matchEvidence?: unknown
   }) {
     return sendJson<any>('/api/pricing', {
       ...params,
-      source: 'manual',
+      source: params.source ?? 'manual',
     }, 'PUT')
   },
 

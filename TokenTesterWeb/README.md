@@ -74,7 +74,7 @@ Uploads are parsed in `src/lib/browser-files.ts` and queued in `src/components/R
 
 The deployed app uses Neon as the pricing source of truth. Static model-pricing bundles are not used at runtime.
 
-Neon table:
+Neon keeps a legacy/effective table plus a source-record table:
 
 ```sql
 model_prices (
@@ -91,12 +91,34 @@ model_prices (
   updated_at timestamptz not null default now(),
   primary key (service_provider, model_id)
 )
+
+model_price_records (
+  service_provider text not null,
+  model_id text not null,
+  source text not null,
+  source_priority integer not null,
+  raw_source_payload jsonb,
+  raw_provider_payload jsonb,
+  match_status text,
+  match_confidence numeric(5, 4),
+  match_method text,
+  match_evidence jsonb,
+  unique (service_provider, model_id, source)
+)
 ```
 
-Prices are stored as USD per 1 million tokens. Manual edits in the Run tab call `PUT /api/pricing` and persist to Neon. Model discovery can also populate pricing when the provider returns machine-readable prices:
+Prices are stored as USD per 1 million tokens. `GET /api/pricing` returns the effective flattened map by selecting the highest-priority source record per provider/model. `GET /api/pricing/records` returns all seed/live/manual records for the Pricing navigator. Source priority is:
+
+- Provider discovery: `100`.
+- Manual edits: `50`.
+- `llm-prices` seed rows: `10`.
+
+Manual edits in the Run tab call `PUT /api/pricing` and persist to Neon. Model discovery can also populate pricing when the provider returns machine-readable prices:
 
 - OpenRouter-style `pricing.prompt` and `pricing.completion` are converted from per-token USD to USD per 1M tokens.
 - xAI `prompt_text_token_price` and `completion_text_token_price` are converted from USD cents per 100M tokens to USD per 1M tokens by dividing by `10000`.
+- Provider discovery stores the raw provider model payload and matching evidence so the navigator can explain why a price applies.
+- The Configure tab `Pricing` button opens the provider/model navigator for effective prices, source precedence, raw context, and match evidence.
 
 ## Environment Variables
 
@@ -148,10 +170,17 @@ Import a JSON or NDJSON pricing file:
 npm run db:import-pricing -- path\to\model-prices.json
 ```
 
+Seed current direct-vendor prices from `simonw/llm-prices`:
+
+```powershell
+npm run db:import-pricing -- llm-prices
+```
+
 Supported JSON shapes:
 
 - Array rows: `{ "provider": "openrouter", "model": "openai/gpt-4o", "input": 2.5, "output": 10 }`.
 - Nested map: `{ "openrouter": { "openai/gpt-4o": { "input": 2.5, "output": 10, "per": "1M" } } }`.
+- `llm-prices` current API shape: `{ "updated_at": "2026-06-09", "prices": [{ "vendor": "openai", "id": "gpt-4o", "name": "GPT-4o", "input": 2.5, "output": 10, "input_cached": 1.25 }] }`.
 
 ## Verification
 
