@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { AppConfig, AttachedFile, DebugEntry, FileItem, PromptEntry, ProviderConfig, TabId, TestRun } from './types'
+import type { AppConfig, AttachedFile, DebugEntry, FileItem, PromptEntry, ProviderConfig, TabId, TestRun, ThemeMode } from './types'
 import { PROVIDER_PRESETS } from './utils/constants'
 
 function loadJSON<T>(key: string, fallback: T): T {
@@ -10,6 +10,22 @@ function loadJSON<T>(key: string, fallback: T): T {
 }
 function saveJSON(key: string, val: any) {
   try { localStorage.setItem(key, JSON.stringify(val)) } catch { /* ignore */ }
+}
+
+function loadThemeMode(): ThemeMode {
+  const mode = loadJSON<ThemeMode | null>('token-tester-theme-mode', null)
+  if (mode === 'system' || mode === 'light' || mode === 'dark') return mode
+  const legacy = loadJSON<boolean | null>('token-tester-dark-mode', null)
+  if (legacy === true) {
+    saveJSON('token-tester-theme-mode', 'dark')
+    return 'dark'
+  }
+  if (legacy === false) {
+    saveJSON('token-tester-theme-mode', 'light')
+    return 'light'
+  }
+  saveJSON('token-tester-theme-mode', 'system')
+  return 'system'
 }
 
 function migratePricingKeys(data: Record<string, any>): Record<string, any> {
@@ -92,8 +108,8 @@ interface AppState {
   isRunning: boolean
   setIsRunning: (v: boolean) => void
 
-  darkMode: boolean
-  toggleDarkMode: () => void
+  themeMode: ThemeMode
+  setThemeMode: (mode: ThemeMode) => void
 }
 
 export const useStore = create<AppState>((set, get) => ({
@@ -214,10 +230,9 @@ export const useStore = create<AppState>((set, get) => ({
   isRunning: false,
   setIsRunning: (v) => set({ isRunning: v }),
 
-  darkMode: loadJSON<boolean>('token-tester-dark-mode', true),
-  toggleDarkMode: () => set((s) => {
-    const next = !s.darkMode
-    saveJSON('token-tester-dark-mode', next)
-    return { darkMode: next }
-  }),
+  themeMode: loadThemeMode(),
+  setThemeMode: (mode) => {
+    saveJSON('token-tester-theme-mode', mode)
+    set({ themeMode: mode })
+  },
 }))

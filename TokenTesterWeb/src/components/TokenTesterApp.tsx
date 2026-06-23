@@ -10,11 +10,21 @@ import { ResultsTab } from './ResultsTab'
 import { webApi } from '../lib/web-api'
 
 export function TokenTesterApp() {
-  const { activeTab, setActiveTab, darkMode, loadBuiltinPricing } = useStore()
+  const { activeTab, setActiveTab, themeMode, loadBuiltinPricing } = useStore()
 
   useEffect(() => {
-    document.documentElement.classList.toggle('dark', darkMode)
-  }, [darkMode])
+    const media = window.matchMedia('(prefers-color-scheme: dark)')
+    const applyTheme = () => {
+      const resolvedDark = themeMode === 'dark' || (themeMode === 'system' && media.matches)
+      document.documentElement.classList.toggle('dark', resolvedDark)
+      document.documentElement.dataset.themeMode = themeMode
+      document.documentElement.style.colorScheme = resolvedDark ? 'dark' : 'light'
+    }
+    applyTheme()
+    if (themeMode !== 'system') return
+    media.addEventListener('change', applyTheme)
+    return () => media.removeEventListener('change', applyTheme)
+  }, [themeMode])
 
   const reloadPricing = useEffectEvent(async () => {
     const builtin = await webApi.getPricing()

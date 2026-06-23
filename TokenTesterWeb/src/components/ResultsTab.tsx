@@ -220,7 +220,7 @@ export function ResultsTab() {
         <span className="inline-flex items-center gap-1">
           {children}
           {active ? (
-            sortDir === 'asc' ? <ArrowUp size={10} className="text-indigo-400" /> : <ArrowDown size={10} className="text-indigo-400" />
+            sortDir === 'asc' ? <ArrowUp size={10} className="text-brand-gold" /> : <ArrowDown size={10} className="text-brand-gold" />
           ) : (
             <ArrowUp size={10} className="text-surface-600 opacity-0 group-hover:opacity-100" />
           )}

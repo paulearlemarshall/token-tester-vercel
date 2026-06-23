@@ -1,17 +1,22 @@
 @import "tailwindcss";
 
 :root {
-  --surface-50: 219 234 254;
-  --surface-100: 15 23 42;
-  --surface-200: 15 23 42;
-  --surface-300: 71 85 105;
-  --surface-400: 100 116 139;
-  --surface-500: 148 163 184;
-  --surface-600: 203 213 225;
-  --surface-700: 216 226 240;
-  --surface-800: 248 250 252;
-  --surface-850: 232 238 251;
-  --surface-900: 240 244 255;
+  --brand-navy: 11 31 58;
+  --brand-blue: 43 52 130;
+  --brand-gold: 215 170 19;
+  --brand-slate: 156 165 171;
+  --brand-charcoal: 41 39 35;
+  --surface-50: 11 31 58;
+  --surface-100: 22 38 67;
+  --surface-200: 41 39 35;
+  --surface-300: 65 74 88;
+  --surface-400: 92 102 112;
+  --surface-500: 122 132 142;
+  --surface-600: 181 190 198;
+  --surface-700: 215 221 226;
+  --surface-800: 244 247 249;
+  --surface-850: 237 241 245;
+  --surface-900: 249 250 251;
   --surface-950: 255 255 255;
   --background: rgb(var(--surface-950));
   --foreground: rgb(var(--surface-200));
@@ -34,9 +39,19 @@
   --color-surface-850: rgb(var(--surface-850));
   --color-surface-900: rgb(var(--surface-900));
   --color-surface-950: rgb(var(--surface-950));
+  --color-brand-navy: rgb(var(--brand-navy));
+  --color-brand-blue: rgb(var(--brand-blue));
+  --color-brand-gold: rgb(var(--brand-gold));
+  --color-brand-slate: rgb(var(--brand-slate));
+  --color-brand-charcoal: rgb(var(--brand-charcoal));
 }
 
 .dark {
+  --brand-navy: 11 31 58;
+  --brand-blue: 83 96 190;
+  --brand-gold: 235 191 45;
+  --brand-slate: 156 165 171;
+  --brand-charcoal: 41 39 35;
   --surface-50: 248 250 252;
   --surface-100: 241 245 249;
   --surface-200: 226 232 240;
@@ -44,11 +59,11 @@
   --surface-400: 148 163 184;
   --surface-500: 100 116 139;
   --surface-600: 71 85 105;
-  --surface-700: 51 65 85;
-  --surface-800: 30 41 59;
-  --surface-850: 23 32 51;
-  --surface-900: 15 23 42;
-  --surface-950: 2 6 23;
+  --surface-700: 48 58 75;
+  --surface-800: 29 39 58;
+  --surface-850: 21 31 49;
+  --surface-900: 11 31 58;
+  --surface-950: 6 16 31;
   --background: rgb(var(--surface-950));
   --foreground: rgb(var(--surface-200));
 }
@@ -86,11 +101,11 @@ body {
   }
 
   .btn {
-    @apply rounded-lg px-4 py-2 text-sm font-medium transition-colors duration-150 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-surface-900 disabled:cursor-not-allowed disabled:opacity-50;
+    @apply rounded-lg px-4 py-2 text-sm font-medium transition-colors duration-150 focus:outline-none focus:ring-2 focus:ring-brand-gold focus:ring-offset-2 focus:ring-offset-surface-900 disabled:cursor-not-allowed disabled:opacity-50;
   }
 
   .btn-primary {
-    @apply rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors duration-150 hover:bg-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 focus:ring-offset-surface-900 disabled:cursor-not-allowed disabled:opacity-50;
+    @apply rounded-lg bg-brand-blue px-4 py-2 text-sm font-medium text-white transition-colors duration-150 hover:bg-brand-navy focus:outline-none focus:ring-2 focus:ring-brand-gold focus:ring-offset-2 focus:ring-offset-surface-900 disabled:cursor-not-allowed disabled:opacity-50 dark:hover:bg-brand-blue/80;
   }
 
   .btn-secondary {
@@ -106,7 +121,7 @@ body {
   }
 
   .input {
-    @apply w-full rounded-lg border border-surface-600 bg-surface-800 px-3 py-2 text-sm text-surface-100 placeholder-surface-400 focus:border-transparent focus:outline-none focus:ring-2 focus:ring-blue-500;
+    @apply w-full rounded-lg border border-surface-600 bg-surface-800 px-3 py-2 text-sm text-surface-100 placeholder-surface-400 focus:border-transparent focus:outline-none focus:ring-2 focus:ring-brand-gold;
   }
 
   .label {
@@ -122,7 +137,7 @@ body {
   }
 
   .badge-blue {
-    @apply inline-flex rounded bg-blue-900/50 px-2 py-0.5 text-xs font-medium text-blue-300;
+    @apply inline-flex rounded bg-brand-blue/15 px-2 py-0.5 text-xs font-medium text-brand-blue dark:text-brand-gold;
   }
 
   .badge-yellow {

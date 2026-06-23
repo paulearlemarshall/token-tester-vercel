@@ -1,9 +1,10 @@
 import { useRef, useState } from 'react'
-import { Paperclip, FolderOpen, X, Eye, EyeOff, FileIcon, ImageIcon, FileTextIcon, Plus, ToggleLeft, ToggleRight, MessageSquare, FolderIcon, CheckSquare, Square } from 'lucide-react'
+import type { DragEvent } from 'react'
+import { Paperclip, FolderOpen, X, Eye, EyeOff, FileIcon, ImageIcon, FileTextIcon, Plus, ToggleLeft, ToggleRight, MessageSquare, FolderIcon, CheckSquare, Square, UploadCloud } from 'lucide-react'
 import { useStore } from '../store'
 import { formatFileSize, truncate } from '../utils/formatters'
 import type { AttachedFile, FileItem } from '../types'
-import { fileToAttached, isSupportedUpload } from '../lib/browser-files'
+import { dataTransferToDroppedFiles, fileToAttached, isSupportedUpload } from '../lib/browser-files'
 
 export function PromptsTab() {
   const {
@@ -14,8 +15,12 @@ export function PromptsTab() {
   const [loading, setLoading] = useState(false)
   const [previewPath, setPreviewPath] = useState<string | null>(null)
   const [newPromptText, setNewPromptText] = useState('')
+  const [isDraggingFiles, setIsDraggingFiles] = useState(false)
+  const [dropNotice, setDropNotice] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const folderInputRef = useRef<HTMLInputElement | null>(null)
+
+  const defaultFilePrompt = 'Extract the information from this document, reply with only the information.'
 
   function handleAddPrompt() {
     const text = newPromptText.trim()
@@ -24,57 +29,139 @@ export function PromptsTab() {
     setNewPromptText('')
   }
 
+  function createFileItem(file: AttachedFile): FileItem {
+    return {
+      id: crypto.randomUUID(),
+      kind: 'file',
+      name: file.name,
+      path: file.path,
+      prompt: defaultFilePrompt,
+      size: file.size,
+      fileCount: 1,
+      file,
+      mode: 'single',
+    }
+  }
+
+  function createFolderItem(name: string, files: AttachedFile[]): FileItem {
+    return {
+      id: crypto.randomUUID(),
+      kind: 'folder',
+      name,
+      path: name,
+      prompt: defaultFilePrompt,
+      size: files.reduce((s, f) => s + f.size, 0),
+      fileCount: files.length,
+      files,
+      mode: 'single',
+    }
+  }
+
   async function handleSelectedFiles(fileList: FileList | null) {
     if (!fileList?.length) return
     setLoading(true)
+    setDropNotice(null)
     try {
-      for (const browserFile of Array.from(fileList).filter(isSupportedUpload)) {
-        const file = await fileToAttached(browserFile)
-        const item: FileItem = {
-          id: crypto.randomUUID(),
-          kind: 'file',
-          name: file.name,
-          path: file.path,
-          prompt: 'Extract the information from this document, reply with only the information.',
-          size: file.size,
-          fileCount: 1,
-          file,
-          mode: 'single',
-        }
-        addFileItem(item)
+      const browserFiles = Array.from(fileList)
+      const supported = browserFiles.filter(isSupportedUpload)
+      for (const browserFile of supported) {
+        addFileItem(createFileItem(await fileToAttached(browserFile)))
       }
-    } catch (err) { console.error(err) }
-    setLoading(false)
+      const skipped = browserFiles.length - supported.length
+      if (skipped > 0) setDropNotice(`Added ${supported.length} file${supported.length !== 1 ? 's' : ''}; skipped ${skipped} unsupported file${skipped !== 1 ? 's' : ''}.`)
+    } catch (err) {
+      console.error(err)
+      setDropNotice('Could not attach one or more files.')
+    } finally {
+      setLoading(false)
+    }
   }
 
   async function handleSelectedFolder(fileList: FileList | null) {
     if (!fileList?.length) return
     setLoading(true)
+    setDropNotice(null)
     try {
-      const files = await Promise.all(Array.from(fileList).filter(isSupportedUpload).map(fileToAttached))
-      if (files.length === 0) return
+      const browserFiles = Array.from(fileList)
+      const supported = browserFiles.filter(isSupportedUpload)
+      const files = await Promise.all(supported.map(file => fileToAttached(file)))
+      if (files.length === 0) {
+        setDropNotice('No supported files found in that folder.')
+        return
+      }
       const firstPath = files[0]?.path ?? ''
       const folderName = firstPath.includes('/') ? firstPath.split('/')[0] : 'Uploaded folder'
-      const item: FileItem = {
-        id: crypto.randomUUID(),
-        kind: 'folder',
-        name: folderName,
-        path: folderName,
-        prompt: 'Extract the information from this document, reply with only the information.',
-        size: files.reduce((s, f) => s + f.size, 0),
-        fileCount: files.length,
-        files,
-        mode: 'single',
+      addFileItem(createFolderItem(folderName, files))
+      const skipped = browserFiles.length - supported.length
+      if (skipped > 0) setDropNotice(`Added ${files.length} file${files.length !== 1 ? 's' : ''}; skipped ${skipped} unsupported file${skipped !== 1 ? 's' : ''}.`)
+    } catch (err) {
+      console.error(err)
+      setDropNotice('Could not stage that folder.')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  async function handleDrop(event: DragEvent<HTMLDivElement>) {
+    event.preventDefault()
+    event.stopPropagation()
+    setIsDraggingFiles(false)
+    setLoading(true)
+    setDropNotice(null)
+    try {
+      const dropped = await dataTransferToDroppedFiles(event.dataTransfer)
+      let addedFiles = 0
+      let skipped = 0
+
+      const supportedLooseFiles = dropped.files.filter(isSupportedUpload)
+      skipped += dropped.files.length - supportedLooseFiles.length
+      for (const file of supportedLooseFiles) {
+        addFileItem(createFileItem(await fileToAttached(file)))
+        addedFiles += 1
       }
-      addFileItem(item)
-    } catch (err) { console.error(err) }
-    setLoading(false)
+
+      for (const folder of dropped.folders) {
+        const supported = folder.files.filter(({ file }) => isSupportedUpload(file))
+        skipped += folder.files.length - supported.length
+        const files = await Promise.all(supported.map(({ file, path }) => fileToAttached(file, path)))
+        if (files.length > 0) {
+          addFileItem(createFolderItem(folder.name, files))
+          addedFiles += files.length
+        }
+      }
+
+      if (dropped.unsupportedFolderDrop) {
+        setDropNotice('This browser did not expose dropped folder contents. Use Stage Folder instead.')
+      } else if (addedFiles === 0) {
+        setDropNotice('No supported files found in the drop.')
+      } else {
+        setDropNotice(`Added ${addedFiles} file${addedFiles !== 1 ? 's' : ''}${skipped > 0 ? `; skipped ${skipped} unsupported file${skipped !== 1 ? 's' : ''}` : ''}.`)
+      }
+    } catch (err) {
+      console.error(err)
+      setDropNotice('Could not read the dropped files. Use Attach Files or Stage Folder instead.')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  function handleDragOver(event: DragEvent<HTMLDivElement>) {
+    event.preventDefault()
+    event.stopPropagation()
+    event.dataTransfer.dropEffect = 'copy'
+    setIsDraggingFiles(true)
+  }
+
+  function handleDragLeave(event: DragEvent<HTMLDivElement>) {
+    if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+      setIsDraggingFiles(false)
+    }
   }
 
   function iconForType(t: string) {
     switch (t) {
-      case 'image': return <ImageIcon size={16} className="text-purple-400" />
-      case 'text': return <FileTextIcon size={16} className="text-blue-400" />
+      case 'image': return <ImageIcon size={16} className="text-brand-gold" />
+      case 'text': return <FileTextIcon size={16} className="text-brand-blue dark:text-brand-gold" />
       default: return <FileIcon size={16} className="text-surface-400" />
     }
   }
@@ -134,7 +221,7 @@ export function PromptsTab() {
                   onClick={() => updatePrompt(p.id, { enabled: !p.enabled })}
                   className="mt-0.5 text-surface-400 hover:text-surface-200 shrink-0"
                 >
-                  {p.enabled ? <ToggleRight size={18} className="text-indigo-400" /> : <ToggleLeft size={18} />}
+                  {p.enabled ? <ToggleRight size={18} className="text-brand-gold" /> : <ToggleLeft size={18} />}
                 </button>
                 <MessageSquare size={14} className="text-surface-500 mt-1 shrink-0" />
                 <input
@@ -151,7 +238,17 @@ export function PromptsTab() {
         )}
       </div>
 
-      <div>
+      <div
+        onDragEnter={handleDragOver}
+        onDragOver={handleDragOver}
+        onDragLeave={handleDragLeave}
+        onDrop={handleDrop}
+        className={`rounded-xl border border-dashed transition-colors ${
+          isDraggingFiles
+            ? 'border-brand-gold bg-brand-gold/10'
+            : 'border-transparent'
+        }`}
+      >
         <div className="flex items-center justify-between mb-2">
           <label className="label mb-0">Files & Folders <span className="text-surface-400 font-normal text-xs">(attach a per-item prompt for each)</span></label>
           <div className="flex gap-2">
@@ -188,6 +285,21 @@ export function PromptsTab() {
           </div>
         </div>
 
+        <div className={`mb-3 flex items-center justify-center gap-2 rounded-lg border px-3 py-3 text-sm transition-colors ${
+          isDraggingFiles
+            ? 'border-brand-gold bg-brand-gold/15 text-surface-100'
+            : 'border-surface-700 bg-surface-900 text-surface-400'
+        }`}>
+          <UploadCloud size={18} className={isDraggingFiles ? 'text-brand-gold' : 'text-surface-500'} />
+          <span>Drag files or folders here, or use the buttons above.</span>
+        </div>
+
+        {dropNotice && (
+          <div className="mb-3 rounded-lg border border-brand-gold/40 bg-brand-gold/10 px-3 py-2 text-xs text-surface-200">
+            {dropNotice}
+          </div>
+        )}
+
         {fileItems.length === 0 ? (
           <div className="card text-center py-8">
             <Paperclip size={24} className="mx-auto text-surface-500 mb-2" />
@@ -218,13 +330,13 @@ export function PromptsTab() {
                       <div className="flex bg-surface-800 rounded-md p-0.5 border border-surface-700 mr-1">
                         <button
                           onClick={() => updateFileItem(item.id, { mode: 'batch' })}
-                          className={`px-2 py-0.5 rounded text-[10px] font-medium transition-colors ${item.mode === 'batch' ? 'bg-indigo-600 text-white' : 'text-surface-400 hover:text-surface-200'}`}
+                          className={`px-2 py-0.5 rounded text-[10px] font-medium transition-colors ${item.mode === 'batch' ? 'bg-brand-blue text-white dark:bg-brand-gold dark:text-brand-charcoal' : 'text-surface-400 hover:text-surface-200'}`}
                         >
                           Batch
                         </button>
                         <button
                           onClick={() => updateFileItem(item.id, { mode: 'single' })}
-                          className={`px-2 py-0.5 rounded text-[10px] font-medium transition-colors ${item.mode === 'single' ? 'bg-indigo-600 text-white' : 'text-surface-400 hover:text-surface-200'}`}
+                          className={`px-2 py-0.5 rounded text-[10px] font-medium transition-colors ${item.mode === 'single' ? 'bg-brand-blue text-white dark:bg-brand-gold dark:text-brand-charcoal' : 'text-surface-400 hover:text-surface-200'}`}
                         >
                           Single
                         </button>
@@ -239,7 +351,7 @@ export function PromptsTab() {
                 <div className="flex items-center gap-2 pl-7">
                   {item.prompt ? (
                     <>
-                      <MessageSquare size={14} className="text-indigo-400 shrink-0" />
+                      <MessageSquare size={14} className="text-brand-gold shrink-0" />
                       <input
                         className="input text-xs flex-1 bg-surface-800 py-1 h-7"
                         value={item.prompt}
@@ -256,7 +368,7 @@ export function PromptsTab() {
                   ) : (
                     <button
                       onClick={() => updateFileItem(item.id, { prompt: ' ' })}
-                      className="text-xs text-surface-400 hover:text-indigo-400 flex items-center gap-1 pl-7"
+                      className="text-xs text-surface-400 hover:text-brand-gold flex items-center gap-1 pl-7"
                     >
                       <Plus size={12} /> Add prompt
                     </button>
@@ -272,7 +384,7 @@ export function PromptsTab() {
                           className="shrink-0 hover:text-surface-200"
                           title={f.enabled !== false ? 'Click to exclude' : 'Click to include'}
                         >
-                          {f.enabled !== false ? <CheckSquare size={13} className="text-indigo-400" /> : <Square size={13} />}
+                          {f.enabled !== false ? <CheckSquare size={13} className="text-brand-gold" /> : <Square size={13} />}
                         </button>
                         {iconForType(f.type)}
                         <span className={`truncate flex-1 ${f.enabled === false ? 'text-surface-600 line-through' : ''}`}>{f.name}</span>

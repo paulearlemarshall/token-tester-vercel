@@ -183,7 +183,7 @@ export function ConfigureTab() {
                   className="text-surface-400 hover:text-surface-200 transition-colors"
                   title={prov.enabled ? 'Disable' : 'Enable'}
                 >
-                  {prov.enabled ? <ToggleRight size={20} className="text-indigo-400" /> : <ToggleLeft size={20} />}
+                  {prov.enabled ? <ToggleRight size={20} className="text-brand-gold" /> : <ToggleLeft size={20} />}
                 </button>
                 <button
                   onClick={() => setExpanded(expanded === prov.id ? null : prov.id)}

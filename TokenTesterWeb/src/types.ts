@@ -82,6 +82,8 @@ export interface TestRun {
 
 export type TabId = 'configure' | 'prompts' | 'run' | 'results'
 
+export type ThemeMode = 'system' | 'light' | 'dark'
+
 export interface PriceEntry {
   input: number
   output: number

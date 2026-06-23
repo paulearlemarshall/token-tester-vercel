@@ -23,9 +23,9 @@ export function isSupportedUpload(file: File) {
   return SUPPORTED_EXTS.has(extensionOf(file.name))
 }
 
-export async function fileToAttached(file: File): Promise<AttachedFile> {
+export async function fileToAttached(file: File, pathOverride?: string): Promise<AttachedFile> {
   const ext = extensionOf(file.name)
-  const path = (file as File & { webkitRelativePath?: string }).webkitRelativePath || file.name
+  const path = pathOverride || (file as File & { webkitRelativePath?: string }).webkitRelativePath || file.name
   const entry: AttachedFile = {
     id: crypto.randomUUID(),
     name: file.name,
@@ -65,6 +65,107 @@ export async function fileToAttached(file: File): Promise<AttachedFile> {
 
   entry.content = `[Unsupported: ${ext}]`
   return entry
+}
+
+export interface DroppedFolder {
+  name: string
+  files: { file: File; path: string }[]
+}
+
+export interface DroppedFiles {
+  files: File[]
+  folders: DroppedFolder[]
+  unsupportedFolderDrop: boolean
+}
+
+interface FileSystemEntry {
+  name: string
+  fullPath: string
+  isFile: boolean
+  isDirectory: boolean
+}
+
+interface FileSystemFileEntry extends FileSystemEntry {
+  file: (success: (file: File) => void, error?: (err: DOMException) => void) => void
+}
+
+interface FileSystemDirectoryEntry extends FileSystemEntry {
+  createReader: () => FileSystemDirectoryReader
+}
+
+interface FileSystemDirectoryReader {
+  readEntries: (success: (entries: FileSystemEntry[]) => void, error?: (err: DOMException) => void) => void
+}
+
+export async function dataTransferToDroppedFiles(dataTransfer: DataTransfer): Promise<DroppedFiles> {
+  const folders = new Map<string, DroppedFolder>()
+  const files: File[] = []
+  let sawDirectory = false
+  let unsupportedFolderDrop = false
+
+  const items = Array.from(dataTransfer.items ?? [])
+  const entries = items
+    .map((item) => typeof item.webkitGetAsEntry === 'function'
+      ? item.webkitGetAsEntry() as FileSystemEntry | null
+      : null)
+    .filter(Boolean) as FileSystemEntry[]
+
+  if (entries.length > 0) {
+    for (const entry of entries) {
+      if (entry.isDirectory) {
+        sawDirectory = true
+        const folderFiles = await walkDirectory(entry as FileSystemDirectoryEntry, entry.name)
+        if (folderFiles.length > 0) {
+          folders.set(entry.name, { name: entry.name, files: folderFiles })
+        }
+        continue
+      }
+
+      if (entry.isFile) {
+        files.push(await readEntryFile(entry as FileSystemFileEntry))
+      }
+    }
+  } else {
+    files.push(...Array.from(dataTransfer.files ?? []))
+  }
+
+  if (!sawDirectory && items.length > 0 && Array.from(dataTransfer.files ?? []).length === 0) {
+    unsupportedFolderDrop = true
+  }
+
+  return { files, folders: Array.from(folders.values()), unsupportedFolderDrop }
+}
+
+async function walkDirectory(entry: FileSystemDirectoryEntry, basePath: string): Promise<{ file: File; path: string }[]> {
+  const output: { file: File; path: string }[] = []
+  for (const child of await readAllDirectoryEntries(entry)) {
+    const childPath = `${basePath}/${child.name}`
+    if (child.isDirectory) {
+      output.push(...await walkDirectory(child as FileSystemDirectoryEntry, childPath))
+    } else if (child.isFile) {
+      output.push({ file: await readEntryFile(child as FileSystemFileEntry), path: childPath })
+    }
+  }
+  return output
+}
+
+async function readAllDirectoryEntries(entry: FileSystemDirectoryEntry) {
+  const reader = entry.createReader()
+  const entries: FileSystemEntry[] = []
+  while (true) {
+    const batch = await new Promise<FileSystemEntry[]>((resolve, reject) => {
+      reader.readEntries(resolve, reject)
+    })
+    if (batch.length === 0) break
+    entries.push(...batch)
+  }
+  return entries
+}
+
+function readEntryFile(entry: FileSystemFileEntry) {
+  return new Promise<File>((resolve, reject) => {
+    entry.file(resolve, reject)
+  })
 }
 
 function extensionOf(name: string) {

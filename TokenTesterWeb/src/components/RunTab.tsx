@@ -387,7 +387,7 @@ export function RunTab() {
   function renderMarkdown(text: string): string {
     let html = text
       .replace(/```(\w*)\n([\s\S]*?)```/g, '<pre class="bg-surface-950 rounded p-3 my-2 text-xs font-mono text-surface-200 overflow-x-auto"><code>$2</code></pre>')
-      .replace(/`([^`]+)`/g, '<code class="bg-surface-800 text-indigo-300 px-1 rounded text-[11px]">$1</code>')
+      .replace(/`([^`]+)`/g, '<code class="bg-surface-800 text-brand-gold px-1 rounded text-[11px]">$1</code>')
       .replace(/### (.+)/g, '<h3 class="text-sm font-semibold text-surface-200 mt-3 mb-1">$1</h3>')
       .replace(/## (.+)/g, '<h2 class="text-base font-semibold text-surface-200 mt-4 mb-1">$1</h2>')
       .replace(/# (.+)/g, '<h1 class="text-lg font-bold text-surface-200 mt-4 mb-2">$1</h1>')
@@ -418,7 +418,7 @@ export function RunTab() {
           </div>
           <div className="w-full bg-surface-800 rounded-full h-2 overflow-hidden">
             <div
-              className="bg-indigo-500 h-full rounded-full transition-all duration-300"
+              className="bg-brand-gold h-full rounded-full transition-all duration-300"
               style={{ width: `${progress.total > 0 ? (progress.completed / progress.total) * 100 : 0}%` }}
             />
           </div>
@@ -429,7 +429,7 @@ export function RunTab() {
         <button
           onClick={() => setSubTab('queue')}
           className={`px-4 py-2 text-xs font-medium border-b-2 transition-colors ${
-            subTab === 'queue' ? 'border-indigo-400 text-surface-100' : 'border-transparent text-surface-400 hover:text-surface-200'
+            subTab === 'queue' ? 'border-brand-gold text-surface-100' : 'border-transparent text-surface-400 hover:text-surface-200'
           }`}
         >
           <List size={14} className="inline mr-1.5" />Queue
@@ -437,7 +437,7 @@ export function RunTab() {
         <button
           onClick={() => { setSubTab('output'); setOutputIndex(0) }}
           className={`px-4 py-2 text-xs font-medium border-b-2 transition-colors ${
-            subTab === 'output' ? 'border-indigo-400 text-surface-100' : 'border-transparent text-surface-400 hover:text-surface-200'
+            subTab === 'output' ? 'border-brand-gold text-surface-100' : 'border-transparent text-surface-400 hover:text-surface-200'
           }`}
         >
           <FileText size={14} className="inline mr-1.5" />Output
@@ -543,7 +543,7 @@ export function RunTab() {
                           >
                             {(() => {
                               const sm = sortModes[prov.name] || 'name-asc'
-                              if (sm === 'active') return <><span className="text-indigo-400">Active</span></>
+                              if (sm === 'active') return <><span className="text-brand-gold">Active</span></>
                               const [f] = sm.split('-')
                               const up = sm.endsWith('asc')
                               return (
@@ -561,8 +561,8 @@ export function RunTab() {
                             }
                             const activeMod = modalityFilters[prov.id]
                             const modColors: Record<string, string> = {
-                              image: 'bg-purple-600/20 text-purple-300 border-purple-600/40 active:bg-purple-600/40',
-                              text: 'bg-blue-600/20 text-blue-300 border-blue-600/40 active:bg-blue-600/40',
+                              image: 'bg-brand-gold/15 text-brand-gold border-brand-gold/40 active:bg-brand-gold/30',
+                              text: 'bg-brand-blue/15 text-brand-blue border-brand-blue/40 active:bg-brand-blue/30 dark:text-brand-gold',
                             }
                             return Array.from(modalities).map(mod => (
                               <button
@@ -570,7 +570,7 @@ export function RunTab() {
                                 onClick={e => { e.stopPropagation(); setModalityFilters(s => ({ ...s, [prov.id]: activeMod === mod ? null : mod })) }}
                                 className={`text-xs shrink-0 rounded-full px-2.5 py-0.5 border transition-all font-medium ${
                                   activeMod === mod
-                                    ? (modColors[mod] || 'bg-indigo-600/20 text-indigo-300 border-indigo-600/40')
+                                    ? (modColors[mod] || 'bg-brand-blue/15 text-brand-blue border-brand-blue/40 dark:text-brand-gold')
                                     : 'bg-transparent text-surface-500 border-surface-600 hover:text-surface-300 hover:border-surface-500'
                                 }`}
                               >
@@ -604,7 +604,7 @@ export function RunTab() {
                                 key={model}
                                 className={`rounded-lg border p-3 transition-all ${
                                   selected
-                                    ? 'bg-indigo-600/10 border-indigo-600/40 hover:bg-indigo-600/20'
+                                    ? 'bg-brand-blue/10 border-brand-blue/40 hover:bg-brand-blue/20 dark:bg-brand-gold/10 dark:border-brand-gold/40'
                                     : 'bg-surface-850 border-surface-700 opacity-50 hover:opacity-80'
                                 }`}
                               >
@@ -613,11 +613,11 @@ export function RunTab() {
                                   className="cursor-pointer"
                                 >
                                   <div className="flex items-start justify-between mb-1">
-                                    <span className={`text-xs font-mono font-medium leading-tight ${selected ? 'text-indigo-300' : 'text-surface-400'}`}>
+                                    <span className={`text-xs font-mono font-medium leading-tight ${selected ? 'text-brand-blue dark:text-brand-gold' : 'text-surface-400'}`}>
                                       {model.length > 28 ? model.slice(0, 26) + '…' : model}
                                     </span>
                                     {selected ? (
-                                      <ToggleRight size={16} className="text-indigo-400 shrink-0" />
+                                      <ToggleRight size={16} className="text-brand-gold shrink-0" />
                                     ) : (
                                       <ToggleLeft size={16} className="text-surface-500 shrink-0" />
                                     )}
@@ -625,7 +625,7 @@ export function RunTab() {
                                   <div className="text-[10px] text-surface-500 space-y-0.5">
                                     {meta?.owned_by && <p>by {meta.owned_by}</p>}
                                     {meta?.context_length && <p>ctx: {(meta.context_length / 1000).toFixed(0)}k</p>}
-                                    {meta?.modality?.includes('image') && <p className="text-indigo-400 font-medium">vision</p>}
+                                    {meta?.modality?.includes('image') && <p className="text-brand-gold font-medium">vision</p>}
                                   </div>
                                 </div>
                                 <div className="flex gap-1 mt-2" onClick={e => e.stopPropagation()}>
@@ -637,7 +637,7 @@ export function RunTab() {
                                       step={0.01}
                                       value={pricing.input || ''}
                                       onChange={e => updateModelPrice(prov.name, model, parseFloat(e.target.value) || 0, pricing.output)}
-                                      className="w-full bg-surface-800 border border-surface-600 rounded text-[10px] px-1 py-0.5 text-surface-100 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                                      className="w-full bg-surface-800 border border-surface-600 rounded text-[10px] px-1 py-0.5 text-surface-100 focus:outline-none focus:ring-1 focus:ring-brand-gold"
                                       placeholder="0"
                                     />
                                   </div>
@@ -649,7 +649,7 @@ export function RunTab() {
                                       step={0.01}
                                       value={pricing.output || ''}
                                       onChange={e => updateModelPrice(prov.name, model, pricing.input, parseFloat(e.target.value) || 0)}
-                                      className="w-full bg-surface-800 border border-surface-600 rounded text-[10px] px-1 py-0.5 text-surface-100 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                                      className="w-full bg-surface-800 border border-surface-600 rounded text-[10px] px-1 py-0.5 text-surface-100 focus:outline-none focus:ring-1 focus:ring-brand-gold"
                                       placeholder="0"
                                     />
                                   </div>
@@ -673,10 +673,10 @@ export function RunTab() {
                 {queue.map((run: TestRun) => (
                   <div key={run.id} className="card flex items-center gap-3 py-1.5 px-3">
                     {run.status === 'queued' && <Clock size={14} className="text-surface-500 shrink-0" />}
-                    {run.status === 'running' && <Loader2 size={14} className="text-indigo-400 animate-spin shrink-0" />}
+                    {run.status === 'running' && <Loader2 size={14} className="text-brand-gold animate-spin shrink-0" />}
                     {run.status === 'success' && <CheckCircle size={14} className="text-emerald-400 shrink-0" />}
                     {run.status === 'error' && <XCircle size={14} className="text-red-400 shrink-0" />}
-                    <span className="text-xs font-mono text-indigo-400 w-20 shrink-0 truncate">{run.providerName}</span>
+                    <span className="text-xs font-mono text-brand-gold w-20 shrink-0 truncate">{run.providerName}</span>
                     <span className="text-xs font-mono text-surface-300 w-28 shrink-0 truncate">{run.model}</span>
                   <span className="text-xs text-surface-400 truncate flex-1">
                     {run.sourceType === 'prompt' ? '💬' : '📄'}{' '}
