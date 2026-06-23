@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Play, Square, Loader2, CheckCircle, XCircle, Clock, Trash2, ChevronRight, ChevronDown, ChevronLeft, ToggleLeft, ToggleRight, Search, Copy, X, Check, ArrowUp, ArrowDown, List, FileText } from 'lucide-react'
+import { Play, Square, Loader2, CheckCircle, XCircle, Clock, Trash2, ChevronRight, ChevronDown, ChevronLeft, ToggleLeft, ToggleRight, Search, Copy, X, Check, ArrowUp, ArrowDown, List, FileText, RotateCcw } from 'lucide-react'
 import { useStore } from '../store'
 import type { AttachedFile, DebugEntry, FileItem, TestRun } from '../types'
 import { formatDuration, truncate } from '../utils/formatters'
@@ -254,104 +254,115 @@ export function RunTab() {
     }).catch(err => console.error('Failed to save model pricing', err))
   }
 
-  async function runAll() {
-    if (queue.length === 0) return
-    setIsRunning(true)
-    setProgress({ completed: 0, total: queue.length })
-    clearDebugEntries()
+  async function executeRun(run: TestRun) {
+    updateRun(run.id, { status: 'running', result: undefined, localInputTokens: undefined })
 
-    const updated = queue.map((r: any) => ({ ...r, status: 'queued' as const }))
-    setQueue(updated)
+    const prov = config.providers.find((p: any) => p.id === run.providerId)
+    if (!prov) {
+      updateRun(run.id, { status: 'error', result: { inputTokens: 0, outputTokens: 0, totalTokens: 0, responseText: '', latencyMs: 0, error: 'Provider not found' } })
+      setProgress((p: any) => ({ ...p, completed: p.completed + 1 }))
+      return
+    }
 
-    for (let i = 0; i < updated.length; i++) {
-      const run = updated[i]
-      if (!useStore.getState().isRunning) break
+    try {
+      let messages = run.sourceType === 'batch' && run.batchFiles
+        ? buildBatchMessages(run.systemPrompt, run.userMessage, run.batchFiles)
+        : buildMessages(run.systemPrompt, run.userMessage, prov.type, run.file)
+      let bodyPayload = buildRequestBody(prov.type, run.model, messages, 4096)
 
-      updateRun(run.id, { status: 'running' })
+      let result = await webApi.chatCompletion({
+        provider: { type: prov.type, baseUrl: prov.baseUrl, apiKeyEnv: prov.apiKeyEnv, headers: prov.headers },
+        model: run.model,
+        messages,
+        maxTokens: 4096,
+        requestBody: bodyPayload,
+      })
 
-      const prov = config.providers.find((p: any) => p.id === run.providerId)
-      if (!prov) {
-        updateRun(run.id, { status: 'error', result: { inputTokens: 0, outputTokens: 0, totalTokens: 0, responseText: '', latencyMs: 0, error: 'Provider not found' } })
-        setProgress((p: any) => ({ ...p, completed: p.completed + 1 }))
-        continue
-      }
-
-      try {
-        const messages = run.sourceType === 'batch' && run.batchFiles
-          ? buildBatchMessages(run.systemPrompt, run.userMessage, run.batchFiles)
-          : buildMessages(run.systemPrompt, run.userMessage, prov.type, run.file)
-        let bodyPayload = buildRequestBody(prov.type, run.model, messages, 4096)
-
-        let result = await webApi.chatCompletion({
+      if (result.error && /max_tokens.*max_completion_tokens/i.test(result.error)) {
+        bodyPayload = retryWithCompletionTokens(bodyPayload, 4096)
+        result = await webApi.chatCompletion({
           provider: { type: prov.type, baseUrl: prov.baseUrl, apiKeyEnv: prov.apiKeyEnv, headers: prov.headers },
           model: run.model,
           messages,
           maxTokens: 4096,
           requestBody: bodyPayload,
         })
+      }
 
-        if (result.error && /max_tokens.*max_completion_tokens/i.test(result.error)) {
-          bodyPayload = retryWithCompletionTokens(bodyPayload, 4096)
-          result = await webApi.chatCompletion({
-            provider: { type: prov.type, baseUrl: prov.baseUrl, apiKeyEnv: prov.apiKeyEnv, headers: prov.headers },
-            model: run.model,
-            messages,
-            maxTokens: 4096,
-            requestBody: bodyPayload,
-          })
-        }
-
-        if (result.error && /invalid.*(mime|image|format)|file.*data.*missing/i.test(result.error)) {
-          const retryFile = run.file ? { ...run.file, type: 'text' as const, content: run.file.content || `[${run.file.ext.toUpperCase()} file]` } : null
-          const retryBatchFiles = run.batchFiles?.map((f: AttachedFile) => ({ ...f, type: 'text' as const, content: f.content || `[${f.ext.toUpperCase()} file]` }))
-          const retryMessages = run.sourceType === 'batch' && retryBatchFiles
-            ? buildBatchMessages(run.systemPrompt, run.userMessage, retryBatchFiles)
-            : buildMessages(run.systemPrompt, run.userMessage, prov.type, retryFile)
-          bodyPayload = buildRequestBody(prov.type, run.model, retryMessages, 4096)
-          result = await webApi.chatCompletion({
-            provider: { type: prov.type, baseUrl: prov.baseUrl, apiKeyEnv: prov.apiKeyEnv, headers: prov.headers },
-            model: run.model,
-            messages: retryMessages,
-            maxTokens: 4096,
-            requestBody: bodyPayload,
-          })
-        }
-
-        const debug: DebugEntry = {
-          provider: prov.name,
+      if (result.error && /invalid.*(mime|image|format)|file.*data.*missing/i.test(result.error)) {
+        const retryFile = run.file ? { ...run.file, type: 'text' as const, content: run.file.content || `[${run.file.ext.toUpperCase()} file]` } : null
+        const retryBatchFiles = run.batchFiles?.map((f: AttachedFile) => ({ ...f, type: 'text' as const, content: f.content || `[${f.ext.toUpperCase()} file]` }))
+        messages = run.sourceType === 'batch' && retryBatchFiles
+          ? buildBatchMessages(run.systemPrompt, run.userMessage, retryBatchFiles)
+          : buildMessages(run.systemPrompt, run.userMessage, prov.type, retryFile)
+        bodyPayload = buildRequestBody(prov.type, run.model, messages, 4096)
+        result = await webApi.chatCompletion({
+          provider: { type: prov.type, baseUrl: prov.baseUrl, apiKeyEnv: prov.apiKeyEnv, headers: prov.headers },
           model: run.model,
-          request: bodyPayload,
-          response: result,
-          error: result.error,
-          file: run.file?.name || (run.batchFiles ? `batch (${run.batchFiles.length})` : ''),
-          filePath: run.file?.path,
-          inputTokens: result.inputTokens,
-          outputTokens: result.outputTokens,
-          latency: result.latencyMs,
-        }
-        pushDebugEntry(debug)
-
-        let localTokens = 0
-        try {
-          const fullText = messages.map((m: any) => typeof m.content === 'string' ? m.content : JSON.stringify(m.content)).join(' ')
-          localTokens = await webApi.countTokens(fullText)
-        } catch { /* ignore */ }
-
-        updateRun(run.id, {
-          status: result.error ? 'error' : 'success',
-          result,
-          localInputTokens: localTokens || undefined,
-        })
-      } catch (err: any) {
-        updateRun(run.id, {
-          status: 'error',
-          result: { inputTokens: 0, outputTokens: 0, totalTokens: 0, responseText: '', latencyMs: 0, error: err.message ?? String(err) },
+          messages,
+          maxTokens: 4096,
+          requestBody: bodyPayload,
         })
       }
 
-      setProgress((p: any) => ({ ...p, completed: p.completed + 1 }))
+      const debug: DebugEntry = {
+        provider: prov.name,
+        model: run.model,
+        request: bodyPayload,
+        response: result,
+        error: result.error,
+        file: run.file?.name || (run.batchFiles ? `batch (${run.batchFiles.length})` : ''),
+        filePath: run.file?.path,
+        inputTokens: result.inputTokens,
+        outputTokens: result.outputTokens,
+        latency: result.latencyMs,
+      }
+      pushDebugEntry(debug)
+
+      let localTokens = 0
+      try {
+        const fullText = messages.map((m: any) => typeof m.content === 'string' ? m.content : JSON.stringify(m.content)).join(' ')
+        localTokens = await webApi.countTokens(fullText)
+      } catch { /* ignore */ }
+
+      updateRun(run.id, {
+        status: result.error ? 'error' : 'success',
+        result,
+        localInputTokens: localTokens || undefined,
+      })
+    } catch (err: any) {
+      updateRun(run.id, {
+        status: 'error',
+        result: { inputTokens: 0, outputTokens: 0, totalTokens: 0, responseText: '', latencyMs: 0, error: err.message ?? String(err) },
+      })
     }
 
+    setProgress((p: any) => ({ ...p, completed: p.completed + 1 }))
+  }
+
+  async function runAll() {
+    if (queue.length === 0) return
+    setIsRunning(true)
+    setProgress({ completed: 0, total: queue.length })
+    clearDebugEntries()
+
+    const updated = queue.map((r: any) => ({ ...r, status: 'queued' as const, result: undefined, localInputTokens: undefined }))
+    setQueue(updated)
+
+    for (let i = 0; i < updated.length; i++) {
+      const run = updated[i]
+      if (!useStore.getState().isRunning) break
+      await executeRun(run)
+    }
+
+    setIsRunning(false)
+  }
+
+  async function retryRun(run: TestRun) {
+    if (isRunning || run.status === 'running') return
+    setIsRunning(true)
+    setProgress({ completed: 0, total: 1 })
+    await executeRun(run)
     setIsRunning(false)
   }
 
@@ -699,6 +710,17 @@ export function RunTab() {
                       <span className="text-xs text-red-400 truncate max-w-[150px] shrink-0" title={run.result.error}>
                         {truncate(run.result.error, 40)}
                       </span>
+                    )}
+                    {run.status === 'error' && (
+                      <button
+                        onClick={() => retryRun(run)}
+                        disabled={isRunning}
+                        className="inline-flex items-center gap-1 rounded-md border border-brand-blue/35 bg-brand-blue/10 px-2 py-1 text-[10px] font-medium text-brand-blue transition-colors hover:bg-brand-blue/20 disabled:cursor-not-allowed disabled:opacity-40 dark:border-brand-gold/35 dark:bg-brand-gold/10 dark:text-brand-gold dark:hover:bg-brand-gold/20"
+                        title="Retry this failed task"
+                      >
+                        <RotateCcw size={12} />
+                        Retry
+                      </button>
                     )}
                     <button
                       onClick={() => removeRun(run.id)}
