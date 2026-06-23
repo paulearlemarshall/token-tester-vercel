@@ -1,5 +1,6 @@
 import { Fragment, useCallback, useEffect, useMemo, useState } from 'react'
-import { ChevronDown, Database, RefreshCw, Search, X } from 'lucide-react'
+import type { ReactNode } from 'react'
+import { ArrowDown, ArrowUp, ChevronDown, Database, RefreshCw, Search, X } from 'lucide-react'
 import { webApi } from '../lib/web-api'
 import { formatCurrency } from '../utils/formatters'
 
@@ -33,6 +34,9 @@ interface PriceGroup {
   records: PriceRecord[]
 }
 
+type SortField = 'provider' | 'model' | 'input' | 'output' | 'winner' | 'records' | 'updated'
+type SortDir = 'asc' | 'desc'
+
 export function PricingNavigator({ onClose }: { onClose: () => void }) {
   const [groups, setGroups] = useState<PriceGroup[]>([])
   const [loading, setLoading] = useState(false)
@@ -41,6 +45,8 @@ export function PricingNavigator({ onClose }: { onClose: () => void }) {
   const [source, setSource] = useState('')
   const [matchFilter, setMatchFilter] = useState('')
   const [expanded, setExpanded] = useState<string | null>(null)
+  const [sortField, setSortField] = useState<SortField>('provider')
+  const [sortDir, setSortDir] = useState<SortDir>('asc')
 
   const loadRecords = useCallback(async () => {
     setLoading(true)
@@ -84,6 +90,78 @@ export function PricingNavigator({ onClose }: { onClose: () => void }) {
     return Array.from(set).sort()
   }, [groups])
 
+  const sortedFiltered = useMemo(() => {
+    const filteredGroups = filtered.slice()
+    const direction = sortDir === 'asc' ? 1 : -1
+    filteredGroups.sort((a, b) => {
+      const effectiveA = a.effective
+      const effectiveB = b.effective
+      let cmp = 0
+
+      switch (sortField) {
+        case 'provider':
+          cmp = a.provider.localeCompare(b.provider)
+          break
+        case 'model':
+          cmp = a.model.localeCompare(b.model)
+          break
+        case 'input':
+          cmp = (effectiveA?.input ?? -1) - (effectiveB?.input ?? -1)
+          break
+        case 'output':
+          cmp = (effectiveA?.output ?? -1) - (effectiveB?.output ?? -1)
+          break
+        case 'winner':
+          cmp = (effectiveA?.source ?? '').localeCompare(effectiveB?.source ?? '')
+          if (cmp === 0) cmp = (effectiveA?.sourcePriority ?? -1) - (effectiveB?.sourcePriority ?? -1)
+          break
+        case 'records':
+          cmp = a.records.length - b.records.length
+          break
+        case 'updated':
+          cmp = new Date(effectiveA?.updatedAt ?? 0).getTime() - new Date(effectiveB?.updatedAt ?? 0).getTime()
+          break
+      }
+
+      if (cmp === 0) {
+        cmp = a.provider.localeCompare(b.provider) || a.model.localeCompare(b.model)
+      }
+      return cmp * direction
+    })
+    return filteredGroups
+  }, [filtered, sortDir, sortField])
+
+  function toggleSort(field: SortField) {
+    if (sortField === field) {
+      setSortDir(current => current === 'asc' ? 'desc' : 'asc')
+      return
+    }
+    setSortField(field)
+    setSortDir('asc')
+  }
+
+  function SortHeader({ field, children, className }: { field: SortField; children: ReactNode; className?: string }) {
+    const active = sortField === field
+    return (
+      <th className={`px-4 py-2 font-medium ${className ?? ''}`}>
+        <button
+          type="button"
+          onClick={() => toggleSort(field)}
+          className="inline-flex items-center gap-1 text-left text-surface-400 hover:text-surface-100"
+        >
+          <span>{children}</span>
+          {active ? (
+            sortDir === 'asc'
+              ? <ArrowUp size={10} className="text-brand-gold" />
+              : <ArrowDown size={10} className="text-brand-gold" />
+          ) : (
+            <span className="text-surface-600">↕</span>
+          )}
+        </button>
+      </th>
+    )
+  }
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-4" onClick={onClose}>
       <div className="flex max-h-[90vh] w-full max-w-6xl flex-col overflow-hidden rounded-2xl border border-surface-700 bg-surface-950 shadow-2xl" onClick={e => e.stopPropagation()}>
@@ -125,31 +203,39 @@ export function PricingNavigator({ onClose }: { onClose: () => void }) {
           <table className="w-full text-left text-xs">
             <thead className="sticky top-0 bg-surface-900 text-surface-400">
               <tr>
-                <th className="px-4 py-2 font-medium">Provider / Model</th>
-                <th className="px-4 py-2 font-medium">Effective</th>
-                <th className="px-4 py-2 font-medium">Winner</th>
-                <th className="px-4 py-2 font-medium">Records</th>
-                <th className="px-4 py-2 font-medium">Updated</th>
+                <SortHeader field="provider">Provider</SortHeader>
+                <SortHeader field="model">Model</SortHeader>
+                <SortHeader field="input" className="text-right">Input</SortHeader>
+                <SortHeader field="output" className="text-right">Output</SortHeader>
+                <SortHeader field="winner">Winner</SortHeader>
+                <SortHeader field="records" className="text-right">Records</SortHeader>
+                <SortHeader field="updated">Updated</SortHeader>
               </tr>
             </thead>
             <tbody>
-              {filtered.map(group => {
+              {sortedFiltered.map(group => {
                 const effective = group.effective
                 const isExpanded = expanded === group.key
                 return (
                   <Fragment key={group.key}>
                     <tr key={group.key} className="border-t border-surface-800 hover:bg-surface-900/70">
-                      <td className="px-4 py-2">
-                        <button onClick={() => setExpanded(isExpanded ? null : group.key)} className="flex max-w-md items-center gap-2 text-left">
+                      <td className="px-4 py-2 align-top">
+                        <button onClick={() => setExpanded(isExpanded ? null : group.key)} className="flex items-center gap-2 text-left">
                           <ChevronDown size={13} className={`shrink-0 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
-                          <span>
-                            <span className="block font-mono text-surface-100">{group.key}</span>
-                            {effective?.displayName && <span className="block text-surface-500">{effective.displayName}</span>}
-                          </span>
+                          <span className="font-mono text-surface-100">{group.provider}</span>
                         </button>
                       </td>
-                      <td className="px-4 py-2 font-mono text-surface-200">
-                        {effective ? `${formatCurrency(effective.input)} / ${formatCurrency(effective.output)}` : '-'}
+                      <td className="px-4 py-2 align-top">
+                        <div className="max-w-md">
+                          <div className="font-mono text-surface-100">{group.model}</div>
+                          {effective?.displayName && <div className="text-surface-500">{effective.displayName}</div>}
+                        </div>
+                      </td>
+                      <td className="px-4 py-2 font-mono text-right text-surface-200">
+                        {effective ? formatCurrency(effective.input) : '-'}
+                      </td>
+                      <td className="px-4 py-2 font-mono text-right text-surface-200">
+                        {effective ? formatCurrency(effective.output) : '-'}
                       </td>
                       <td className="px-4 py-2">
                         {effective ? (
@@ -158,12 +244,12 @@ export function PricingNavigator({ onClose }: { onClose: () => void }) {
                           </span>
                         ) : '-'}
                       </td>
-                      <td className="px-4 py-2 text-surface-300">{group.records.length}</td>
+                      <td className="px-4 py-2 text-right text-surface-300">{group.records.length}</td>
                       <td className="px-4 py-2 text-surface-400">{effective ? new Date(effective.updatedAt).toLocaleString() : '-'}</td>
                     </tr>
                     {isExpanded && (
                       <tr className="border-t border-surface-800 bg-surface-950">
-                        <td colSpan={5} className="px-4 py-3">
+                        <td colSpan={7} className="px-4 py-3">
                           <div className="space-y-3">
                             {group.records.map(record => (
                               <div key={`${record.key}-${record.source}`} className="rounded-lg border border-surface-800 bg-surface-900 p-3">

@@ -1,13 +1,8 @@
-# Token Tester Vercel
+# Token Tester Web
 
-This repository contains the original Electron app and a Vercel-deployable web port.
+Token Tester Web is the Vercel-deployed Next.js app for comparing model responses, token usage, latency, and estimated cost across multiple AI providers while keeping provider API keys on the server.
 
-## Apps
-
-- `TokenTesterElectron`: original Electron/Vite desktop app.
-- `TokenTesterWeb`: Next.js App Router web app for Vercel. See `TokenTesterWeb/README.md` for the full Vercel architecture, environment, database, and deploy guide.
-
-## Web Workflow
+## Workflow
 
 ```powershell
 cd TokenTesterWeb
@@ -17,24 +12,17 @@ npm run build
 vercel deploy --prod --yes
 ```
 
-Provider secrets are read only by Next.js route handlers from Vercel environment variables. See `TokenTesterWeb/.env.example` for supported keys.
+Provider secrets are read only by Next.js route handlers from Vercel environment variables. Model pricing is stored in Neon Postgres, and the deployed app can seed from `llm-prices` or accept provider-discovered and manual overrides.
 
-Model pricing is stored in Neon Postgres. Static pricing files are not used by the deployed app.
-
-```powershell
-npm run db:setup
-npm run db:import-pricing -- path\to\model-prices.json
-```
-
-The production web app is deployed at:
+The production app is deployed at:
 
 ```text
 https://token-tester-web.vercel.app
 ```
 
-Current web behavior notes:
+Current behavior notes:
 
-- xAI replaces the old Groq preset and uses `XAI_API_KEY`.
+- Gemini pricing is canonicalized under `google/*`.
 - Manual model price edits and provider-discovered prices persist to Neon.
 - Failed queue tasks can be retried individually.
 - Unsupported binary attachments are skipped before inference and count as zero tokens/cost.

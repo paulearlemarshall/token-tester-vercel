@@ -1,6 +1,6 @@
 # Token Tester Web
 
-Next.js App Router port of the Token Tester Electron app, designed for deployment on Vercel. The app compares model responses, token usage, latency, and estimated cost across multiple AI providers while keeping provider API keys on the server.
+Token Tester Web is the Vercel-deployed Next.js App Router app for comparing model responses, token usage, latency, and estimated cost across multiple AI providers while keeping provider API keys on the server.
 
 ## Runtime
 
@@ -123,6 +123,7 @@ Manual edits in the Run tab call `PUT /api/pricing` and persist to Neon. Model d
 - The Configure tab `Pricing` button opens the provider/model navigator for effective prices, source precedence, raw context, and match evidence.
 - Gemini pricing is canonicalized under `google/*`, so direct Gemini model cards like `gemini-2.5-flash` resolve against `google/gemini-2.5-flash`.
 - Provider-discovery rows override seeded `llm-prices` rows when both exist for the same canonical provider/model.
+- The Pricing navigator table is sortable by provider, model, input, output, winner, record count, and updated time, in both directions.
 
 ## Environment Variables
 
