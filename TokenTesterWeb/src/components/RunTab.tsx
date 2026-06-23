@@ -71,8 +71,21 @@ function serviceKey(providerName: string) {
   return providerName.trim().toLowerCase().replace(/&/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '')
 }
 
-function providerRequiresTextOnlyParts(provider: { name: string; baseUrl: string }) {
-  return provider.name.toLowerCase().includes('deepseek') || provider.baseUrl.toLowerCase().includes('api.deepseek.com')
+function providerKey(provider: { name: string; baseUrl: string }) {
+  return `${provider.name} ${provider.baseUrl}`.toLowerCase()
+}
+
+function providerRequiresTextOnlyParts(provider: { name: string; baseUrl: string }, model?: string) {
+  const key = providerKey(provider)
+  const modelId = (model ?? '').toLowerCase()
+  return key.includes('deepseek') || key.includes('api.deepseek.com') || modelId.includes('deepseek')
+}
+
+function providerSupportsDocumentParts(provider: { type: string; baseUrl: string }) {
+  const baseUrl = provider.baseUrl.toLowerCase()
+  return provider.type === 'anthropic'
+    || provider.type === 'gemini'
+    || (provider.type === 'openai-compat' && baseUrl.includes('api.openai.com'))
 }
 
 function modelLozenges(providerName: string, modelId: string, meta: any, pricing: { input: number; output: number }) {
@@ -110,16 +123,20 @@ function lozengeClass(tone: 'blue' | 'gold' | 'slate' | 'green') {
   }
 }
 
-function unsupportedAttachmentReason(provider: { name: string; baseUrl: string }, run: TestRun) {
-  if (!providerRequiresTextOnlyParts(provider)) return null
+function unsupportedAttachmentReason(provider: { name: string; type: string; baseUrl: string }, run: TestRun) {
   const files = run.sourceType === 'batch'
     ? (run.batchFiles ?? [])
     : (run.file ? [run.file] : [])
-  const unsupported = files.filter(file => file.type !== 'text')
+  const unsupported = files.filter(file => {
+    if (file.type === 'text') return false
+    if (providerRequiresTextOnlyParts(provider, run.model)) return true
+    if (file.type === 'document') return !providerSupportsDocumentParts(provider)
+    return false
+  })
   if (unsupported.length === 0) return null
   const names = unsupported.slice(0, 3).map(file => file.name).join(', ')
   const suffix = unsupported.length > 3 ? `, and ${unsupported.length - 3} more` : ''
-  return `${provider.name} only supports text message parts; skipped unsupported attachment${unsupported.length !== 1 ? 's' : ''}: ${names}${suffix}`
+  return `${provider.name} does not support this attachment type for ${run.model}; skipped unsupported attachment${unsupported.length !== 1 ? 's' : ''}: ${names}${suffix}`
 }
 
 export function RunTab() {
@@ -326,7 +343,7 @@ export function RunTab() {
     }
 
     try {
-      let messages = run.sourceType === 'batch' && run.batchFiles
+      const messages = run.sourceType === 'batch' && run.batchFiles
         ? buildBatchMessages(run.systemPrompt, run.userMessage, run.batchFiles)
         : buildMessages(run.systemPrompt, run.userMessage, prov.type, run.file)
       let bodyPayload = buildRequestBody(prov.type, run.model, messages, 4096)
@@ -350,20 +367,21 @@ export function RunTab() {
         })
       }
 
-      if (result.error && /invalid.*(mime|image|format)|file.*data.*missing/i.test(result.error)) {
-        const retryFile = run.file ? { ...run.file, type: 'text' as const, content: run.file.content || `[${run.file.ext.toUpperCase()} file]` } : null
-        const retryBatchFiles = run.batchFiles?.map((f: AttachedFile) => ({ ...f, type: 'text' as const, content: f.content || `[${f.ext.toUpperCase()} file]` }))
-        messages = run.sourceType === 'batch' && retryBatchFiles
-          ? buildBatchMessages(run.systemPrompt, run.userMessage, retryBatchFiles)
-          : buildMessages(run.systemPrompt, run.userMessage, prov.type, retryFile)
-        bodyPayload = buildRequestBody(prov.type, run.model, messages, 4096)
-        result = await webApi.chatCompletion({
-          provider: { type: prov.type, baseUrl: prov.baseUrl, apiKeyEnv: prov.apiKeyEnv, headers: prov.headers },
-          model: run.model,
-          messages,
-          maxTokens: 4096,
-          requestBody: bodyPayload,
+      if (result.error && /invalid.*(mime|image|format)|file.*data.*missing|unknown variant.*(image_url|file)|expected `text`/i.test(result.error)) {
+        updateRun(run.id, {
+          status: 'skipped',
+          result: {
+            inputTokens: 0,
+            outputTokens: 0,
+            totalTokens: 0,
+            responseText: '',
+            latencyMs: 0,
+            error: `${prov.name} rejected the attachment for ${run.model}; skipped instead of retrying with a placeholder.`,
+          },
+          localInputTokens: undefined,
         })
+        setProgress((p: any) => ({ ...p, completed: p.completed + 1 }))
+        return
       }
 
       const debug: DebugEntry = {
