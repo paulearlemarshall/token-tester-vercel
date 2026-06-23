@@ -2,7 +2,22 @@
 
 Token Tester Web is the Vercel-deployed Next.js app for comparing model responses, token usage, latency, and estimated cost across multiple AI providers while keeping provider API keys on the server.
 
-## Workflow
+Production app:
+
+```text
+https://token-tester-web.vercel.app
+```
+
+## What It Does
+
+- Configures multiple providers and discovers their models.
+- Runs prompt and file-based tests across selected models.
+- Measures latency, token counts, and estimated cost.
+- Stores pricing in Neon Postgres with manual, seeded, and provider-discovered overrides.
+- Skips unsupported attachments instead of forcing placeholder retries.
+- Surfaces raw pricing records, precedence, and evidence in a navigator UI.
+
+## Core Workflow
 
 ```powershell
 cd TokenTesterWeb
@@ -12,18 +27,16 @@ npm run build
 vercel deploy --prod --yes
 ```
 
-Provider secrets are read only by Next.js route handlers from Vercel environment variables. Model pricing is stored in Neon Postgres, and the deployed app can seed from `llm-prices` or accept provider-discovered and manual overrides.
-
-The production app is deployed at:
-
-```text
-https://token-tester-web.vercel.app
-```
-
-Current behavior notes:
+## Key Notes
 
 - Gemini pricing is canonicalized under `google/*`.
 - Manual model price edits and provider-discovered prices persist to Neon.
-- Failed queue tasks can be retried individually.
+- DeepSeek and DeepSeek-routed models are treated as text-only.
 - Unsupported binary attachments are skipped before inference and count as zero tokens/cost.
-- DeepSeek and DeepSeek-routed models are treated as text-only; PDFs and other document attachments are skipped rather than sent as placeholder prompts.
+- OpenRouter PDFs are handled through OpenRouter's universal PDF parsing path.
+- xAI / Grok documents and PDFs are allowed through the shared document-attachment path.
+- The Pricing navigator is sortable and shows effective values plus underlying records.
+
+## Documentation
+
+- [TokenTesterWeb/README.md](TokenTesterWeb/README.md) covers architecture, pricing, providers, file handling, database setup, and deployment in detail.

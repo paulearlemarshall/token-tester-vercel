@@ -17,12 +17,16 @@ export function getAttachmentCapabilities(provider: ProviderLike, model?: string
   const normalizedBaseUrl = provider.baseUrl.trim().toLowerCase()
   const normalizedModel = (model ?? '').trim().toLowerCase()
   const isDeepSeek = normalizedName.includes('deepseek') || normalizedBaseUrl.includes('api.deepseek.com') || normalizedModel.includes('deepseek')
+  const isOpenRouter = normalizedName.includes('openrouter') || normalizedBaseUrl.includes('openrouter.ai')
+  const isXai = normalizedName.includes('xai') || normalizedBaseUrl.includes('api.x.ai')
 
   return {
     supportsImages: provider.type === 'openai-compat' || provider.type === 'anthropic' || provider.type === 'gemini',
     supportsDocuments:
       provider.type === 'anthropic'
       || provider.type === 'gemini'
+      || isOpenRouter
+      || isXai
       || (provider.type === 'openai-compat' && normalizedBaseUrl.includes('api.openai.com')),
     requiresTextOnlyAttachments: isDeepSeek,
   }

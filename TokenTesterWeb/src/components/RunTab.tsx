@@ -878,6 +878,9 @@ export function RunTab() {
                 <div className="flex-1" />
 
                 <div className="flex items-center gap-2">
+                  <span className="text-[10px] text-surface-500">
+                    {displayEntry?.error ? 'Error' : 'Success'}
+                  </span>
                   <button
                     onClick={() => setOutputIndex(Math.max(0, displayIndex - 1))}
                     disabled={displayIndex === 0 || filteredDebugEntries.length === 0}
@@ -897,9 +900,6 @@ export function RunTab() {
                   </button>
                 </div>
 
-                <span className="text-[10px] text-surface-500">
-                  {displayEntry?.error ? 'Error' : 'Success'}
-                </span>
               </div>
 
               {displayEntry ? (

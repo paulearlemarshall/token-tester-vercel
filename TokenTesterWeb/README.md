@@ -1,6 +1,23 @@
 # Token Tester Web
 
-Token Tester Web is the Vercel-deployed Next.js App Router app for comparing model responses, token usage, latency, and estimated cost across multiple AI providers while keeping provider API keys on the server.
+Token Tester Web is a Vercel-deployed Next.js App Router app for comparing model responses, token usage, latency, and estimated cost across multiple AI providers while keeping provider API keys on the server.
+
+## Overview
+
+The app is built for repeated comparison work:
+
+- Configure providers and fetch their available models.
+- Select model subsets per provider.
+- Queue prompt runs and file runs across many model/provider combinations.
+- Collect response text, token counts, latency, and cost estimates.
+- Inspect and override pricing from the app itself.
+- Store pricing records in Neon with source precedence and matching evidence.
+
+Production deployment:
+
+```text
+https://token-tester-web.vercel.app
+```
 
 ## Runtime
 
@@ -17,10 +34,11 @@ Token Tester Web is the Vercel-deployed Next.js App Router app for comparing mod
 - `src/app/page.tsx`: renders the client app shell.
 - `src/app/layout.tsx`: global metadata and layout.
 - `src/components/TokenTesterApp.tsx`: top-level tabbed interface.
-- `src/components/ConfigureTab.tsx`: provider setup, model discovery, fetched pricing import.
+- `src/components/ConfigureTab.tsx`: provider setup, model discovery, fetched pricing import, and the Pricing navigator entry point.
 - `src/components/PromptsTab.tsx`: prompt and file input management.
-- `src/components/RunTab.tsx`: model selection, cost fields, execution queue, unsupported attachment skips, retry actions, and per-model price edits.
+- `src/components/RunTab.tsx`: model selection, queue creation, unsupported attachment skips, retry actions, and per-model price edits.
 - `src/components/ResultsTab.tsx`: run results, summaries, charts, and exports.
+- `src/components/PricingNavigator.tsx`: provider/model price browser with source records, evidence, and sorting.
 - `src/components/layout/Sidebar.tsx`: primary navigation.
 - `src/lib/provider-api.ts`: server-side provider model discovery and chat completion adapters.
 - `src/lib/pricing.ts`: Neon pricing read/write logic.
@@ -32,17 +50,20 @@ Token Tester Web is the Vercel-deployed Next.js App Router app for comparing mod
 - `src/utils/constants.ts`: provider presets and labels.
 - `src/utils/formatters.ts`: display formatting helpers.
 - `src/types.ts`: shared app and API types.
-- `scripts/setup-pricing-db.mjs`: creates the Neon `model_prices` table and indexes.
-- `scripts/seed-pricing.mjs`: imports pricing JSON or NDJSON into Neon.
+- `scripts/setup-pricing-db.mjs`: creates the Neon pricing tables and indexes.
+- `scripts/seed-pricing.mjs`: imports pricing JSON, NDJSON, or `llm-prices` into Neon.
 
-## API Routes
+## Request Flow
 
-- `POST /api/models`: calls provider model discovery using server-side env vars. OpenAI-compatible providers call `{baseUrl}/v1/models`; Gemini and Anthropic use provider-specific routes.
-- `POST /api/chat`: calls provider chat/completion APIs using server-side env vars. OpenAI-compatible providers call `{baseUrl}/v1/chat/completions`.
-- `GET /api/pricing`: reads model prices from Neon only.
-- `PUT /api/pricing`: upserts one model price into Neon.
+The browser never talks directly to provider APIs for model discovery or chat completion.
 
-Provider secrets are never exposed to the browser. The browser sends the provider type, base URL, model, and env var name; the route handler reads the actual secret from Vercel or local `.env.local`.
+1. The user configures a provider in the UI.
+2. The browser calls a Next.js route handler.
+3. The route handler reads the real API key from Vercel or local `.env.local`.
+4. The server adapter talks to the provider API.
+5. The browser receives normalized models, pricing, or chat results.
+
+This keeps provider secrets on the server and keeps the browser focused on UI, state, and local preview logic.
 
 ## Providers
 
@@ -59,6 +80,20 @@ Built-in presets are defined in `src/utils/constants.ts`.
 
 Saved browser configs that still reference the old Groq preset are migrated in `src/store.ts` to xAI with `XAI_API_KEY`.
 
+## Model Discovery
+
+`POST /api/models` returns provider-specific model lists and metadata.
+
+- OpenAI-compatible providers call `{baseUrl}/v1/models`.
+- Gemini uses the Google Generative Language models endpoint.
+- Anthropic uses its messages API model listing.
+
+When the provider returns machine-readable pricing, the UI persists that pricing immediately:
+
+- OpenRouter-style `pricing.prompt` and `pricing.completion` are normalized to USD per 1M tokens.
+- xAI `prompt_text_token_price` and `completion_text_token_price` are normalized from cents per 100M tokens to USD per 1M tokens.
+- The raw provider payload is stored alongside the price record so the navigator can explain what matched.
+
 ## File and Document Handling
 
 Uploads are parsed in `src/lib/browser-files.ts` and queued in `src/components/RunTab.tsx`.
@@ -66,10 +101,12 @@ Uploads are parsed in `src/lib/browser-files.ts` and queued in `src/components/R
 - Text files are sent as text message parts.
 - Images are sent as image parts when the provider capability helper says the provider supports them.
 - PDFs and DOCX files are classified as `document` attachments and are only sent to providers that the app explicitly treats as document-capable.
+- OpenRouter is treated as document-capable because it exposes a universal PDF handler and can parse PDFs even when the downstream model does not natively accept file input.
+- xAI / Grok is treated as document-capable as well; the xAI files docs cover PDF attachments, file upload, and chat with files.
 - Unsupported attachments are marked `skipped` before inference. Skipped runs record zero input tokens, zero output tokens, zero latency, and zero cost.
-- If a provider rejects a file, image, or document payload, the run is marked `skipped`; the app must not retry with a placeholder such as `[.PDF file]`, because that encourages hallucinated answers.
+- If a provider rejects a file, image, or document payload, the run is marked `skipped`; the app must not retry with a placeholder such as `[.PDF file]`.
 - DeepSeek providers and DeepSeek-routed models are treated as text-only and skip PDFs, DOCX files, and images.
-- Generic OpenAI-compatible providers are conservative by default. OpenAI's own API is treated as document-capable; other OpenAI-compatible gateways should be explicitly allowed only after their request schema is verified.
+- Generic OpenAI-compatible providers are conservative by default. OpenAI's own API is treated as document-capable; other OpenAI-compatible gateways are only allowed once their file-input schema is verified.
 - Queue rows with `error` status can be retried individually. Queue rows with `skipped` status are informational and are not retried, because the input is known to be unsupported.
 
 ## Pricing
@@ -109,13 +146,19 @@ model_price_records (
 )
 ```
 
-Prices are stored as USD per 1 million tokens. `GET /api/pricing` returns the effective flattened map by selecting the highest-priority source record per provider/model. `GET /api/pricing/records` returns all seed/live/manual records for the Pricing navigator. Source priority is:
+Prices are stored as USD per 1 million tokens.
+
+- `GET /api/pricing` returns the effective flattened map by selecting the highest-priority source record per provider/model.
+- `GET /api/pricing/records` returns all seed/live/manual records for the Pricing navigator.
+- `PUT /api/pricing` upserts one model price into Neon.
+
+Source priority is:
 
 - Provider discovery: `100`.
 - Manual edits: `50`.
 - `llm-prices` seed rows: `10`.
 
-Manual edits in the Run tab call `PUT /api/pricing` and persist to Neon. Model discovery can also populate pricing when the provider returns machine-readable prices:
+Model discovery can also populate pricing when the provider returns machine-readable prices:
 
 - OpenRouter-style `pricing.prompt` and `pricing.completion` are converted from per-token USD to USD per 1M tokens.
 - xAI `prompt_text_token_price` and `completion_text_token_price` are converted from USD cents per 100M tokens to USD per 1M tokens by dividing by `10000`.
@@ -123,7 +166,30 @@ Manual edits in the Run tab call `PUT /api/pricing` and persist to Neon. Model d
 - The Configure tab `Pricing` button opens the provider/model navigator for effective prices, source precedence, raw context, and match evidence.
 - Gemini pricing is canonicalized under `google/*`, so direct Gemini model cards like `gemini-2.5-flash` resolve against `google/gemini-2.5-flash`.
 - Provider-discovery rows override seeded `llm-prices` rows when both exist for the same canonical provider/model.
-- The Pricing navigator table is sortable by provider, model, input, output, winner, record count, and updated time, in both directions.
+
+## Pricing Navigator
+
+The Pricing navigator shows effective pricing plus the full record history for each provider/model pair.
+
+It is sortable by:
+
+- Provider
+- Model
+- Input
+- Output
+- Winner
+- Record count
+- Updated time
+
+Sorting works in both directions and the expanded row shows:
+
+- Source, priority, and match status
+- Input and output rates
+- Upstream provider
+- Last seen time
+- Match evidence
+- Seed payload
+- Provider payload
 
 ## Environment Variables
 
@@ -161,7 +227,7 @@ npm run dev
 
 Open `http://localhost:3000`.
 
-## Database Setup and Imports
+## Database Setup And Imports
 
 Create or repair the schema:
 
