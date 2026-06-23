@@ -3,3 +3,49 @@
 
 This version has breaking changes — APIs, conventions, and file structure may all differ from your training data. Read the relevant guide in `node_modules/next/dist/docs/` before writing any code. Heed deprecation notices.
 <!-- END:nextjs-agent-rules -->
+
+# Token Tester Web Agent Notes
+
+This directory is the Vercel-deployable Next.js App Router port of the Token Tester app. Treat `TokenTesterWeb` as the deploy root for Vercel commands.
+
+## Project Shape
+
+- `src/app`: Next.js routes, layout, global CSS, and server API route handlers.
+- `src/components`: client UI tabs for configure, prompts, run, results, and navigation.
+- `src/lib/provider-api.ts`: server-side provider discovery and chat completion adapters.
+- `src/lib/pricing.ts`: Neon-backed model pricing reads and writes.
+- `src/store.ts`: Zustand browser state and localStorage migrations.
+- `src/utils/constants.ts`: built-in provider presets.
+- `scripts`: Neon schema setup and pricing import utilities.
+
+## Vercel Rules
+
+- Deploy from `TokenTesterWeb`, not the repository root.
+- Production URL is `https://token-tester-web.vercel.app`.
+- Use `vercel env ls` before assuming a secret exists.
+- Use `vercel env pull .env.local` for local server-side testing.
+- Run `npm run lint` and `npm run build` before production deploys.
+- Deploy with `vercel deploy --prod --yes`.
+- Check `vercel inspect token-tester-web.vercel.app` and recent error logs after deploy.
+
+## Data and Secrets
+
+- Provider API keys must stay server-side in route handlers.
+- The browser may send an env var name such as `XAI_API_KEY`, but never the secret value.
+- Model pricing is sourced from Neon Postgres through `/api/pricing`.
+- Static pricing bundles are not used at runtime.
+- Manual price edits and fetched provider prices should be persisted through `PUT /api/pricing`.
+- Prices are stored as USD per 1M tokens.
+
+## Provider Notes
+
+- OpenAI-compatible providers call `{baseUrl}/v1/models` and `{baseUrl}/v1/chat/completions`.
+- xAI is configured as OpenAI-compatible at `https://api.x.ai` using `XAI_API_KEY`.
+- xAI model discovery returns prices in USD cents per 100M tokens; divide by `10000` before storing as USD per 1M tokens.
+- Anthropic and Gemini use provider-specific adapters.
+
+## Git Rules
+
+- Keep commits scoped to the task.
+- Do not revert unrelated user changes.
+- Commit and push deployable changes before production deployment.

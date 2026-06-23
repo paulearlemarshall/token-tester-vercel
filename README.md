@@ -5,7 +5,7 @@ This repository contains the original Electron app and a Vercel-deployable web p
 ## Apps
 
 - `TokenTesterElectron`: original Electron/Vite desktop app.
-- `TokenTesterWeb`: Next.js App Router web app for Vercel.
+- `TokenTesterWeb`: Next.js App Router web app for Vercel. See `TokenTesterWeb/README.md` for the full Vercel architecture, environment, database, and deploy guide.
 
 ## Web Workflow
 
