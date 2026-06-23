@@ -52,11 +52,11 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     models: ['mistral-large-latest', 'mistral-small-latest'],
   },
   {
-    name: 'Groq',
+    name: 'xAI',
     type: 'openai-compat',
-    baseUrl: 'https://api.groq.com/openai',
-    apiKeyEnv: 'GROQ_API_KEY',
-    models: ['mixtral-8x7b-32768', 'llama-3.1-70b-versatile', 'llama-3.1-8b-instant'],
+    baseUrl: 'https://api.x.ai',
+    apiKeyEnv: 'XAI_API_KEY',
+    models: ['grok-4.3', 'grok-build-0.1'],
   },
 ]
 
@@ -68,5 +68,5 @@ export const PROVIDER_LOGOS: Record<string, string> = {
   'Google Gemini': '✨',
   DeepSeek: '🌊',
   Mistral: '🌬️',
-  Groq: '⚡',
+  xAI: '✕',
 }

@@ -25,6 +25,26 @@ function migratePricingKeys(data: Record<string, any>): Record<string, any> {
   return migrated
 }
 
+function migrateConfig(data: AppConfig): AppConfig {
+  const providers = data.providers.map((provider) => {
+    if (provider.name !== 'Groq' && provider.apiKeyEnv !== 'GROQ_API_KEY') return provider
+    return {
+      ...provider,
+      name: 'xAI',
+      type: 'openai-compat' as const,
+      baseUrl: 'https://api.x.ai',
+      apiKeyEnv: 'XAI_API_KEY',
+      models: provider.models.length > 0 && provider.name !== 'Groq'
+        ? provider.models
+        : ['grok-4.3', 'grok-build-0.1'],
+      headers: undefined,
+    }
+  })
+  const migrated = { providers }
+  saveJSON('token-tester-config', migrated)
+  return migrated
+}
+
 interface AppState {
   activeTab: TabId
   setActiveTab: (tab: TabId) => void
@@ -80,7 +100,7 @@ export const useStore = create<AppState>((set, get) => ({
   activeTab: 'configure',
   setActiveTab: (tab) => set({ activeTab: tab }),
 
-  config: loadJSON<AppConfig>('token-tester-config', { providers: [] }),
+  config: migrateConfig(loadJSON<AppConfig>('token-tester-config', { providers: [] })),
 
   initFromPreset: (presetName) => {
     const preset = PROVIDER_PRESETS.find((p: any) => p.name === presetName)

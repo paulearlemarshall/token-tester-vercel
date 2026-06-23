@@ -87,7 +87,7 @@ OpenAI-compatible providers share `POST /v1/chat/completions` request and usage 
 
 | Provider family | Type | Notes |
 |---|---|---|
-| OpenAI, OpenRouter, DeepSeek, Mistral, Groq, Together, Perplexity, xAI, Fireworks, SS&C AI Gateway | `openai-compat` | Uses bearer auth and OpenAI-compatible chat completions. |
+| OpenAI, OpenRouter, DeepSeek, Mistral, Together, Perplexity, xAI, Fireworks, SS&C AI Gateway | `openai-compat` | Uses bearer auth and OpenAI-compatible chat completions. |
 | Anthropic | `anthropic` | Uses `x-api-key` and `anthropic-version`; model discovery is intentionally disabled because Anthropic does not expose a models API endpoint. |
 | Gemini | `gemini` | Uses Google Generative Language API with key query parameter. |
 
