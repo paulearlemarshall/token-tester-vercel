@@ -71,6 +71,19 @@ function serviceKey(providerName: string) {
   return providerName.trim().toLowerCase().replace(/&/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '')
 }
 
+function providerRequiresTextOnlyParts(provider: { name: string; baseUrl: string }) {
+  return provider.name.toLowerCase().includes('deepseek') || provider.baseUrl.toLowerCase().includes('api.deepseek.com')
+}
+
+function asTextOnlyFile(file: AttachedFile): AttachedFile {
+  if (file.type === 'text') return file
+  return {
+    ...file,
+    type: 'text',
+    content: file.content || `[${file.ext.toUpperCase()} file: ${file.name} omitted because this provider only accepts text message parts]`,
+  }
+}
+
 export function RunTab() {
   const {
     config, systemPrompt, customPrompts, fileItems,
@@ -265,9 +278,12 @@ export function RunTab() {
     }
 
     try {
-      let messages = run.sourceType === 'batch' && run.batchFiles
-        ? buildBatchMessages(run.systemPrompt, run.userMessage, run.batchFiles)
-        : buildMessages(run.systemPrompt, run.userMessage, prov.type, run.file)
+      const textOnlyParts = providerRequiresTextOnlyParts(prov)
+      const initialFile = textOnlyParts && run.file ? asTextOnlyFile(run.file) : run.file
+      const initialBatchFiles = textOnlyParts ? run.batchFiles?.map(asTextOnlyFile) : run.batchFiles
+      let messages = run.sourceType === 'batch' && initialBatchFiles
+        ? buildBatchMessages(run.systemPrompt, run.userMessage, initialBatchFiles)
+        : buildMessages(run.systemPrompt, run.userMessage, prov.type, initialFile)
       let bodyPayload = buildRequestBody(prov.type, run.model, messages, 4096)
 
       let result = await webApi.chatCompletion({
