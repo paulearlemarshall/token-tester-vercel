@@ -54,12 +54,12 @@ export function ConfigureTab() {
       const token = match[0]
       if (token.startsWith('"')) {
         const next = text[tokenRegex.lastIndex]
-        const keyClass = next === ':' ? 'text-amber-300' : 'text-emerald-300'
+        const keyClass = next === ':' ? 'text-brand-gold' : 'text-brand-blue dark:text-brand-gold'
         out += `<span class="${keyClass}">${escapeHtml(token)}</span>`
       } else if (token === 'true' || token === 'false' || token === 'null') {
         out += `<span class="text-fuchsia-300">${token}</span>`
       } else if (/^\d/.test(token) || /^-/.test(token)) {
-        out += `<span class="text-sky-300">${token}</span>`
+        out += `<span class="text-brand-blue dark:text-brand-gold">${token}</span>`
       } else {
         out += `<span class="text-surface-500">${escapeHtml(token)}</span>`
       }
@@ -341,13 +341,13 @@ export function ConfigureTab() {
         >
           <div
             className={`w-full max-w-4xl overflow-hidden rounded-2xl border shadow-2xl ${
-              fetchDialog.ok ? 'border-emerald-900/60 bg-surface-950' : 'border-red-900/60 bg-surface-950'
+              fetchDialog.ok ? 'border-brand-blue/50 bg-surface-950 dark:border-brand-gold/45' : 'border-red-900/60 bg-surface-950'
             }`}
             onClick={e => e.stopPropagation()}
           >
-            <div className={`flex items-start justify-between border-b px-5 py-4 ${fetchDialog.ok ? 'border-emerald-900/40 bg-emerald-950/20' : 'border-red-900/40 bg-red-950/20'}`}>
+            <div className={`flex items-start justify-between border-b px-5 py-4 ${fetchDialog.ok ? 'border-brand-blue/30 bg-brand-blue/10 dark:border-brand-gold/30 dark:bg-brand-gold/10' : 'border-red-900/40 bg-red-950/20'}`}>
               <div className="space-y-1">
-                <div className={`text-sm font-semibold ${fetchDialog.ok ? 'text-emerald-300' : 'text-red-300'}`}>{fetchDialog.title}</div>
+                <div className={`text-sm font-semibold ${fetchDialog.ok ? 'text-brand-blue dark:text-brand-gold' : 'text-red-300'}`}>{fetchDialog.title}</div>
                 <div className="text-xs text-surface-400 font-mono">{fetchDialog.provider}</div>
               </div>
               <button
@@ -376,7 +376,7 @@ export function ConfigureTab() {
                   className="btn-secondary text-xs flex items-center gap-1.5"
                   disabled={!fetchDialog.responseText}
                 >
-                  {copiedResponse ? <Check size={14} className="text-emerald-400" /> : <Copy size={14} />}
+                  {copiedResponse ? <Check size={14} className="text-brand-gold" /> : <Copy size={14} />}
                   {copiedResponse ? 'Copied' : 'Copy response'}
                 </button>
               </div>
@@ -414,7 +414,7 @@ export function ConfigureTab() {
                   </div>
                 )}
               </div>
-              <div className={`rounded-xl border px-4 py-3 text-sm ${fetchDialog.ok ? 'border-emerald-900/50 bg-emerald-950/20 text-emerald-200' : 'border-red-900/50 bg-red-950/20 text-red-200'}`}>
+              <div className={`rounded-xl border px-4 py-3 text-sm ${fetchDialog.ok ? 'border-brand-blue/40 bg-brand-blue/10 text-brand-navy dark:border-brand-gold/40 dark:bg-brand-gold/10 dark:text-brand-gold' : 'border-red-900/50 bg-red-950/20 text-red-200'}`}>
                 {fetchDialog.ok ? 'Fetch succeeded.' : fetchDialog.responseText}
               </div>
             </div>

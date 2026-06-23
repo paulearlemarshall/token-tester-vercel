@@ -117,7 +117,7 @@ body {
   }
 
   .btn-success {
-    @apply rounded-lg bg-emerald-700 px-4 py-2 text-sm font-medium text-white transition-colors duration-150 hover:bg-emerald-600 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 focus:ring-offset-surface-900 disabled:cursor-not-allowed disabled:opacity-50;
+    @apply rounded-lg bg-brand-navy px-4 py-2 text-sm font-medium text-white transition-colors duration-150 hover:bg-brand-blue focus:outline-none focus:ring-2 focus:ring-brand-gold focus:ring-offset-2 focus:ring-offset-surface-900 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-brand-gold dark:text-brand-charcoal dark:hover:bg-brand-gold/85;
   }
 
   .input {
@@ -133,7 +133,7 @@ body {
   }
 
   .badge-green {
-    @apply inline-flex rounded bg-emerald-900/50 px-2 py-0.5 text-xs font-medium text-emerald-300;
+    @apply inline-flex rounded bg-brand-blue/15 px-2 py-0.5 text-xs font-medium text-brand-blue dark:bg-brand-gold/15 dark:text-brand-gold;
   }
 
   .badge-blue {
