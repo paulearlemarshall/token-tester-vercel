@@ -33,6 +33,11 @@ export interface ChatParams {
   requestBody?: unknown
 }
 
+function centsPer100mToUsdPer1m(value: unknown) {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return undefined
+  return value / 10_000
+}
+
 export async function fetchProviderModels(params: ModelFetchParams) {
   const apiKey = process.env[params.apiKeyEnv] || ''
   if (!apiKey) return { models: [], error: `API key not found for env var "${params.apiKeyEnv}"` }
@@ -64,6 +69,16 @@ export async function fetchProviderModels(params: ModelFetchParams) {
           pricing[m.id] = {
             input: (m.pricing.prompt ?? 0) * 1_000_000,
             output: (m.pricing.completion ?? 0) * 1_000_000,
+          }
+          continue
+        }
+
+        const xaiInput = centsPer100mToUsdPer1m(m.prompt_text_token_price)
+        const xaiOutput = centsPer100mToUsdPer1m(m.completion_text_token_price)
+        if (xaiInput != null || xaiOutput != null) {
+          pricing[m.id] = {
+            input: xaiInput ?? 0,
+            output: xaiOutput ?? 0,
           }
         }
       }
