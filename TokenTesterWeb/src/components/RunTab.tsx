@@ -5,8 +5,9 @@ import type { AttachedFile, DebugEntry, FileItem, TestRun } from '../types'
 import { formatDuration, truncate } from '../utils/formatters'
 import { webApi } from '../lib/web-api'
 import { canonicalProviderKey, pricingLookupKeys, type ProviderKeyInput } from '../lib/provider-key'
+import { providerCanAcceptAttachment, requiresTextOnlyAttachments, supportsDocumentAttachments, supportsImageAttachments } from '../lib/provider-capabilities'
 
-function buildMessages(systemPrompt: string, userMessage: string, providerType: string, file: AttachedFile | null): any[] {
+function buildMessages(systemPrompt: string, userMessage: string, provider: { name: string; type: string; baseUrl: string }, file: AttachedFile | null): any[] {
   const messages: any[] = []
   if (systemPrompt) messages.push({ role: 'system', content: systemPrompt })
   if (!file) {
@@ -14,11 +15,11 @@ function buildMessages(systemPrompt: string, userMessage: string, providerType: 
     return messages
   }
   const content: any[] = [{ type: 'text', text: userMessage || `Analyze this file: ${file.name}` }]
-  if (file.type === 'image' && (providerType === 'openai-compat' || providerType === 'anthropic' || providerType === 'gemini')) {
+  if (file.type === 'image' && supportsImageAttachments(provider)) {
     content.push({ type: 'image_url', image_url: { url: `data:${file.mimeType};base64,${file.base64}` } })
-  } else if (file.type === 'document' && providerType === 'openai-compat') {
+  } else if (file.type === 'document' && provider.type === 'openai-compat' && supportsDocumentAttachments(provider)) {
     content.push({ type: 'file', file: { filename: file.name, file_data: `data:${file.mimeType};base64,${file.base64}` } })
-  } else if (file.type === 'document' && (providerType === 'anthropic' || providerType === 'gemini')) {
+  } else if (file.type === 'document' && supportsDocumentAttachments(provider)) {
     content.push({ type: 'image_url', image_url: { url: `data:${file.mimeType};base64,${file.base64}` } })
   } else if (file.content) {
     content.push({ type: 'text', text: `\n\n\`\`\`\n${file.content}\n\`\`\`` })
@@ -27,7 +28,7 @@ function buildMessages(systemPrompt: string, userMessage: string, providerType: 
   return messages
 }
 
-function buildBatchMessages(systemPrompt: string, userMessage: string, files: AttachedFile[]): any[] {
+function buildBatchMessages(systemPrompt: string, userMessage: string, provider: { name: string; type: string; baseUrl: string }, files: AttachedFile[]): any[] {
   const messages: any[] = []
   if (systemPrompt) messages.push({ role: 'system', content: systemPrompt })
 
@@ -38,7 +39,11 @@ function buildBatchMessages(systemPrompt: string, userMessage: string, files: At
       parts.push({ type: 'image_url', image_url: { url: `data:${f.mimeType};base64,${f.base64}` } })
     } else if (f.type === 'document') {
       parts.push({ type: 'text', text: `\n--- ${f.name} ---` })
-      parts.push({ type: 'file', file: { filename: f.name, file_data: `data:${f.mimeType};base64,${f.base64}` } })
+      if (provider.type === 'openai-compat' && supportsDocumentAttachments(provider)) {
+        parts.push({ type: 'file', file: { filename: f.name, file_data: `data:${f.mimeType};base64,${f.base64}` } })
+      } else {
+        parts.push({ type: 'image_url', image_url: { url: `data:${f.mimeType};base64,${f.base64}` } })
+      }
     } else if (f.content) {
       parts.push({ type: 'text', text: `\n--- ${f.name} ---\n\`\`\`\n${f.content}\n\`\`\`` })
     }
@@ -66,23 +71,6 @@ function retryWithCompletionTokens(body: any, maxTokens: number): any {
   delete retry.max_tokens
   retry.max_completion_tokens = maxTokens
   return retry
-}
-
-function providerKey(provider: { name: string; baseUrl: string }) {
-  return `${provider.name} ${provider.baseUrl}`.toLowerCase()
-}
-
-function providerRequiresTextOnlyParts(provider: { name: string; baseUrl: string }, model?: string) {
-  const key = providerKey(provider)
-  const modelId = (model ?? '').toLowerCase()
-  return key.includes('deepseek') || key.includes('api.deepseek.com') || modelId.includes('deepseek')
-}
-
-function providerSupportsDocumentParts(provider: { type: string; baseUrl: string }) {
-  const baseUrl = provider.baseUrl.toLowerCase()
-  return provider.type === 'anthropic'
-    || provider.type === 'gemini'
-    || (provider.type === 'openai-compat' && baseUrl.includes('api.openai.com'))
 }
 
 function modelLozenges(providerName: string, modelId: string, meta: any, pricing: { input: number; output: number }) {
@@ -126,9 +114,8 @@ function unsupportedAttachmentReason(provider: { name: string; type: string; bas
     : (run.file ? [run.file] : [])
   const unsupported = files.filter(file => {
     if (file.type === 'text') return false
-    if (providerRequiresTextOnlyParts(provider, run.model)) return true
-    if (file.type === 'document') return !providerSupportsDocumentParts(provider)
-    return false
+    if (requiresTextOnlyAttachments(provider, run.model)) return true
+    return !providerCanAcceptAttachment(provider, run.model, file.type === 'image' ? 'image' : 'document')
   })
   if (unsupported.length === 0) return null
   const names = unsupported.slice(0, 3).map(file => file.name).join(', ')
@@ -347,8 +334,8 @@ export function RunTab() {
 
     try {
       const messages = run.sourceType === 'batch' && run.batchFiles
-        ? buildBatchMessages(run.systemPrompt, run.userMessage, run.batchFiles)
-        : buildMessages(run.systemPrompt, run.userMessage, prov.type, run.file)
+        ? buildBatchMessages(run.systemPrompt, run.userMessage, prov, run.batchFiles)
+        : buildMessages(run.systemPrompt, run.userMessage, prov, run.file)
       let bodyPayload = buildRequestBody(prov.type, run.model, messages, 4096)
 
       let result = await webApi.chatCompletion({
