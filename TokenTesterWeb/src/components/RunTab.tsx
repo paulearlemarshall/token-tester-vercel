@@ -184,6 +184,7 @@ function providerHandlingDetails(provider: any, selectedModels: string[]) {
           'messages include optional system role and a user content array.',
           'Text uses { type: "text" }. Images use image_url data URLs. Documents use file_data.',
           'Audio uses { type: "input_audio", inputAudio: { data, format } } with base64 data.',
+          'Audio-only runs on transcription-output models use /v1/audio/transcriptions instead of chat completions.',
         ]
       case 'openai':
         return [
@@ -225,6 +226,7 @@ function providerHandlingDetails(provider: any, selectedModels: string[]) {
     attachmentRules.push('OpenRouter is treated as document-capable for PDFs through its universal PDF parsing path.')
     attachmentRules.push('OpenRouter image support is model-dependent; the app sends image_url for image-capable use, and provider rejection is marked skipped rather than retried with placeholders.')
     attachmentRules.push('OpenRouter audio support is model-dependent; the app sends base64 input_audio with the audio format inferred from the filename or MIME type.')
+    attachmentRules.push('OpenRouter transcription-output models use the dedicated audio transcriptions endpoint for audio-only runs.')
   }
   if (adapter.id === 'xai') {
     attachmentRules.push('xAI always uses the Responses API in this app; PDFs are not sent through chat completions.')
@@ -334,7 +336,12 @@ export function RunTab() {
     if (modFilter) {
       const prov = config.providers.find((p: any) => p.id === providerId)
       const metas = prov?.modelMetas || []
-      const modModelIds = new Set(metas.filter((m: any) => m.modality?.includes(modFilter)).map((m: any) => m.id))
+      const [direction, modality] = modFilter.includes(':') ? modFilter.split(':') : ['legacy', modFilter]
+      const modModelIds = new Set(metas.filter((m: any) => {
+        if (direction === 'in') return (m.inputModalities || []).includes(modality)
+        if (direction === 'out') return (m.outputModalities || []).includes(modality)
+        return m.modality?.includes(modality)
+      }).map((m: any) => m.id))
       list = list.filter(m => modModelIds.has(m))
     }
     return list
@@ -540,7 +547,7 @@ export function RunTab() {
       sentMedia = payloadMediaSummary(filesForRun(run))
 
       let result = await webApi.chatCompletion({
-        provider: { type: prov.type, adapterId: prov.adapterId, baseUrl: prov.baseUrl, apiKeyEnv: prov.apiKeyEnv, headers: prov.headers },
+        provider: { type: prov.type, adapterId: prov.adapterId, baseUrl: prov.baseUrl, apiKeyEnv: prov.apiKeyEnv, headers: prov.headers, modelMetas: prov.modelMetas },
         model: run.model,
         input,
         maxTokens: 4096,
@@ -548,7 +555,7 @@ export function RunTab() {
 
       if (result.error && /max_tokens.*max_completion_tokens/i.test(result.error)) {
         result = await webApi.chatCompletion({
-          provider: { type: prov.type, adapterId: prov.adapterId, baseUrl: prov.baseUrl, apiKeyEnv: prov.apiKeyEnv, headers: prov.headers },
+          provider: { type: prov.type, adapterId: prov.adapterId, baseUrl: prov.baseUrl, apiKeyEnv: prov.apiKeyEnv, headers: prov.headers, modelMetas: prov.modelMetas },
           model: run.model,
           input,
           maxTokens: 4096,
@@ -873,16 +880,30 @@ export function RunTab() {
                             })()}
                           </button>
                           {(() => {
-                            const modalities = new Set<string>()
+                            const filters = new Map<string, string>()
                             for (const m of (prov.modelMetas || [])) {
-                              if (m.modality) m.modality.split('+').forEach((x: string) => { if (x.trim() !== 'text') modalities.add(x.trim()) })
+                              for (const mod of (m.inputModalities || [])) {
+                                if (mod && mod !== 'text') filters.set(`in:${mod}`, `${mod === 'image' ? 'Image' : mod} In`)
+                              }
+                              for (const mod of (m.outputModalities || [])) {
+                                if (mod && mod !== 'text') filters.set(`out:${mod}`, `${mod === 'transcription' ? 'Transcription' : mod} Out`)
+                              }
+                              if (!m.inputModalities && !m.outputModalities && m.modality) {
+                                m.modality.split('+').forEach((x: string) => {
+                                  const mod = x.trim()
+                                  if (mod !== 'text') filters.set(mod, mod === 'image' ? 'Vision' : mod)
+                                })
+                              }
                             }
                             const activeMod = modalityFilters[prov.id]
                             const modColors: Record<string, string> = {
                               image: 'bg-brand-gold/15 text-brand-gold border-brand-gold/40 active:bg-brand-gold/30',
+                              'in:image': 'bg-brand-gold/15 text-brand-gold border-brand-gold/40 active:bg-brand-gold/30',
+                              'in:audio': 'bg-brand-blue/15 text-brand-blue border-brand-blue/40 dark:text-brand-gold',
+                              'out:transcription': 'bg-emerald-500/15 text-emerald-300 border-emerald-500/40',
                               text: 'bg-brand-blue/15 text-brand-blue border-brand-blue/40 active:bg-brand-blue/30 dark:text-brand-gold',
                             }
-                            return Array.from(modalities).map(mod => (
+                            return Array.from(filters.entries()).map(([mod, label]) => (
                               <button
                                 key={mod}
                                 onClick={e => { e.stopPropagation(); setModalityFilters(s => ({ ...s, [prov.id]: activeMod === mod ? null : mod })) }}
@@ -892,7 +913,7 @@ export function RunTab() {
                                     : 'bg-transparent text-surface-500 border-surface-600 hover:text-surface-300 hover:border-surface-500'
                                 }`}
                               >
-                                {mod === 'image' ? 'Vision' : mod}
+                                {label}
                               </button>
                             ))
                           })()}

@@ -75,6 +75,7 @@ export function unsupportedAttachmentReason(provider: ProviderRef, run: TestRun)
 
 function defaultUserMessage(run: TestRun, files: AttachedFile[]) {
   if (files.length === 0) return 'Hello'
+  if (files.every(file => file.type === 'audio')) return 'Perform speech to text on this file'
   if (files.length === 1) return `Analyze this file: ${files[0].name}`
   return `Analyze the following ${files.length} files:`
 }

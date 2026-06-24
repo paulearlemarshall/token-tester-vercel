@@ -19,6 +19,7 @@ https://token-tester-web.vercel.app
 - Preserve completed queue rows when adding more models.
 - Skip unsupported file/provider combinations without retrying fake placeholder content.
 - Run text, image, PDF, DOCX, audio, video, and batch-file workloads where provider adapters support them.
+- Default audio-only file runs use a speech-to-text prompt unless the user supplies a custom prompt.
 - Track local token estimates, provider token usage, latency, output text, errors, and estimated cost.
 - Persist every completed run to Neon with checksums, timestamps, provider metadata, payloads, and pricing context.
 - Slice archived observations by provider, model, status, source, file, prompt, checksum, suppression state, and date.
@@ -232,6 +233,7 @@ The inspector shows:
 - Document support.
 - Text-file behavior.
 - Model-specific restrictions.
+- Input and output modality filters when provider metadata exposes them.
 - Skip behavior.
 - Selected models for that provider.
 
@@ -246,6 +248,7 @@ Examples:
 - OpenAI audio attachments use `input_audio` with `input_audio: { data, format }` on audio-capable chat models.
 - OpenRouter is treated as PDF-capable through its universal PDF path, while image and audio support are model-dependent.
 - OpenRouter audio attachments use `input_audio` with `inputAudio: { data, format }`.
+- OpenRouter transcription-output models use `/v1/audio/transcriptions` for audio-only runs.
 - DeepSeek-routed models are treated as text-only.
 
 ## File And Attachment Handling
@@ -262,9 +265,11 @@ Attachment kinds:
 
 Provider behavior:
 
+- Audio-only default prompts ask the model to perform speech-to-text; custom per-file prompts override this.
 - OpenRouter PDFs use OpenRouter's universal PDF handling path.
 - OpenAI audio files use Chat Completions `input_audio` parts with base64 data and inferred audio format.
 - OpenRouter audio files use OpenRouter's `inputAudio` variant with base64 data and inferred audio format.
+- OpenRouter audio-only runs with transcription-output models use the dedicated transcriptions endpoint and return the transcript text directly.
 - xAI PDFs use the Responses API, with file upload and `input_file` references.
 - xAI images use `input_image`.
 - xAI audio files use the REST `/v1/stt` transcription endpoint before the transcript is appended to the response prompt.
@@ -305,6 +310,7 @@ Canonical pricing behavior:
 - Gemini pricing is stored under `google`.
 - Gemini card names such as `gemini-2.5-flash` resolve against `google/gemini-2.5-flash`.
 - OpenRouter models preserve routed model IDs.
+- OpenRouter model discovery captures `architecture.input_modalities` and `architecture.output_modalities` and fetches non-text output models for filtering.
 - Provider discovery stores raw provider payloads and match evidence.
 - Manual edits remain visible as manual source records.
 

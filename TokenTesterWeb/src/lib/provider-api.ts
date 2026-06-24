@@ -1,4 +1,4 @@
-import type { ProviderAdapterId, ProviderType } from '../types'
+import type { ModelMeta, ProviderAdapterId, ProviderType } from '../types'
 import type { NormalizedAttachment, NormalizedRunInput } from './run-input'
 import { getProviderAdapter } from './provider-registry'
 
@@ -30,6 +30,7 @@ export interface ChatParams {
     baseUrl: string
     apiKeyEnv: string
     headers?: string
+    modelMetas?: ModelMeta[]
   }
   model: string
   input?: NormalizedRunInput
@@ -48,13 +49,12 @@ export async function fetchProviderModels(params: ModelFetchParams) {
 
   try {
     if (params.type === 'openai-compat') {
-      const url = `${params.baseUrl.replace(/\/+$/, '')}/v1/models`
+      const baseModelsUrl = `${params.baseUrl.replace(/\/+$/, '')}/v1/models`
       const extra = parseHeaders(params.headers)
-      const res = await fetch(url, {
-        headers: { Authorization: `Bearer ${apiKey}`, ...extra },
-      })
-      if (!res.ok) return { models: [], error: `${res.status}: ${res.statusText}` }
-      const data = await res.json()
+      const adapter = getProviderAdapter(params)
+      const data = adapter.id === 'openrouter'
+        ? await fetchOpenRouterModelCatalog(baseModelsUrl, apiKey, extra)
+        : await fetchJsonWithAuth(baseModelsUrl, apiKey, extra)
       const rawModels = data.data || []
       const models = rawModels
         .map((m: any) => m.id)
@@ -66,6 +66,8 @@ export async function fetchProviderModels(params: ModelFetchParams) {
         owned_by: m.owned_by,
         context_length: m.context_length,
         modality: m.architecture?.modality,
+        inputModalities: Array.isArray(m.architecture?.input_modalities) ? m.architecture.input_modalities : undefined,
+        outputModalities: Array.isArray(m.architecture?.output_modalities) ? m.architecture.output_modalities : undefined,
       }))
       const rawModelsById = Object.fromEntries(rawModels.map((m: any) => [m.id, m]))
       const pricing: Record<string, { input: number; output: number }> = {}
@@ -130,6 +132,34 @@ export async function fetchProviderModels(params: ModelFetchParams) {
   }
 }
 
+async function fetchJsonWithAuth(url: string, apiKey: string, extraHeaders: Record<string, string>) {
+  const res = await fetch(url, {
+    headers: { Authorization: `Bearer ${apiKey}`, ...extraHeaders },
+  })
+  if (!res.ok) throw new Error(`${res.status}: ${res.statusText}`)
+  return res.json()
+}
+
+async function fetchOpenRouterModelCatalog(baseModelsUrl: string, apiKey: string, extraHeaders: Record<string, string>) {
+  const urls = [
+    `${baseModelsUrl}?output_modalities=all`,
+    `${baseModelsUrl}?output_modalities=transcription`,
+  ]
+  const responses = await Promise.all(urls.map(async url => {
+    try {
+      return await fetchJsonWithAuth(url, apiKey, extraHeaders)
+    } catch {
+      return { data: [] }
+    }
+  }))
+  const merged = new Map<string, any>()
+  for (const item of responses.flatMap(response => response.data || [])) {
+    if (item?.id) merged.set(item.id, item)
+  }
+  if (merged.size > 0) return { data: Array.from(merged.values()) }
+  return fetchJsonWithAuth(baseModelsUrl, apiKey, extraHeaders)
+}
+
 interface ApiResult {
   inputTokens: number
   outputTokens: number
@@ -182,7 +212,9 @@ export async function chatCompletion(params: ChatParams) {
         result = await chatOpenAICompat(provider.baseUrl, apiKey, model, input, maxTokens, provider.headers, buildOpenAIMessages)
         break
       case 'openrouter':
-        result = await chatOpenAICompat(provider.baseUrl, apiKey, model, input, maxTokens, provider.headers, buildOpenRouterMessages)
+        result = shouldUseOpenRouterTranscription(model, input, provider.modelMetas)
+          ? await transcribeOpenRouterAudio(provider.baseUrl, apiKey, model, input, provider.headers)
+          : await chatOpenAICompat(provider.baseUrl, apiKey, model, input, maxTokens, provider.headers, buildOpenRouterMessages)
         break
       default:
         throw new Error(`Unknown provider adapter: ${adapter.id}`)
@@ -321,6 +353,79 @@ function buildOpenRouterMessages(input: NormalizedRunInput) {
   }
   messages.push({ role: 'user', content })
   return messages
+}
+
+function modelHasOutputModality(model: string, modelMetas: ModelMeta[] | undefined, modality: string) {
+  const meta = modelMetas?.find(item => item.id === model)
+  const outputModalities = meta?.outputModalities?.map(item => item.toLowerCase()) ?? []
+  return outputModalities.includes(modality.toLowerCase())
+}
+
+function shouldUseOpenRouterTranscription(model: string, input: NormalizedRunInput, modelMetas?: ModelMeta[]) {
+  const audioAttachments = input.attachments.filter(attachment => attachment.kind === 'audio')
+  if (audioAttachments.length === 0) return false
+  const hasNonAudioBinary = input.attachments.some(attachment => attachment.kind !== 'audio' && attachment.kind !== 'text')
+  if (hasNonAudioBinary) return false
+  return modelHasOutputModality(model, modelMetas, 'transcription') || /(?:^|\/)(whisper|gpt-4o-transcribe|gpt-4o-mini-transcribe)/i.test(model)
+}
+
+async function transcribeOpenRouterAudio(
+  baseUrl: string,
+  apiKey: string,
+  model: string,
+  input: NormalizedRunInput,
+  extraHeaders?: string
+): Promise<ApiResult> {
+  const audioAttachments = input.attachments.filter(attachment => attachment.kind === 'audio' && attachment.base64)
+  if (audioAttachments.length === 0) throw new Error('OpenRouter transcription requires at least one audio attachment')
+
+  const url = `${baseUrl.replace(/\/+$/, '')}/v1/audio/transcriptions`
+  const extra = parseHeaders(extraHeaders)
+  const requests = audioAttachments.map(attachment => ({
+    model,
+    input_audio: {
+      data: attachment.base64,
+      format: audioFormatForChatCompletion(attachment),
+    },
+  }))
+  const responses = []
+  for (const body of requests) {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}`, ...extra },
+      body: JSON.stringify(body),
+    })
+    if (!res.ok) {
+      const text = await res.text()
+      throw new Error(`${res.status} ${res.statusText}: ${text.slice(0, 500)}`)
+    }
+    responses.push(await res.json())
+  }
+
+  const responseText = responses.map((response, index) => {
+    const text = typeof response?.text === 'string' ? response.text : ''
+    if (responses.length === 1) return text
+    return `--- ${audioAttachments[index]?.filename ?? `audio ${index + 1}`} ---\n${text}`
+  }).filter(Boolean).join('\n\n')
+  const usage = responses.reduce((sum, response) => {
+    const item = response?.usage ?? {}
+    return {
+      inputTokens: sum.inputTokens + (item.input_tokens ?? 0),
+      outputTokens: sum.outputTokens + (item.output_tokens ?? 0),
+      totalTokens: sum.totalTokens + (item.total_tokens ?? 0),
+    }
+  }, { inputTokens: 0, outputTokens: 0, totalTokens: 0 })
+
+  return {
+    inputTokens: usage.inputTokens,
+    outputTokens: usage.outputTokens,
+    totalTokens: usage.totalTokens || (usage.inputTokens + usage.outputTokens),
+    responseText,
+    error: responseText ? undefined : 'OpenRouter transcription returned no text. Inspect the raw response payload for details.',
+    requestPayload: requests.length === 1 ? requests[0] : requests,
+    requestUrl: url,
+    responsePayload: responses.length === 1 ? responses[0] : responses,
+  }
 }
 
 function parseXaiResponseText(data: any): string {
