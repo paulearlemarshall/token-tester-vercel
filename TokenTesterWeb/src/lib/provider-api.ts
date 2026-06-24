@@ -209,9 +209,11 @@ export async function chatCompletion(params: ChatParams) {
         result = await chatOpenAICompat(provider.baseUrl, apiKey, model, input, maxTokens, provider.headers)
         break
       case 'openai':
-        result = hasAudioAttachments(input)
-          ? await chatOpenAICompat(provider.baseUrl, apiKey, model, input, maxTokens, provider.headers, buildOpenAIMessages)
-          : await chatOpenAIResponses(provider.baseUrl, apiKey, model, input, maxTokens, provider.headers)
+        result = shouldUseOpenAITranscription(model, input, provider.modelMetas)
+          ? await transcribeOpenAI(provider.baseUrl, apiKey, model, input, provider.headers)
+          : hasAudioAttachments(input)
+            ? await chatOpenAICompat(provider.baseUrl, apiKey, model, input, maxTokens, provider.headers, buildOpenAIMessages)
+            : await chatOpenAIResponses(provider.baseUrl, apiKey, model, input, maxTokens, provider.headers)
         break
       case 'openrouter':
         result = shouldUseOpenRouterTranscription(model, input, provider.modelMetas)
@@ -400,6 +402,64 @@ function shouldUseOpenRouterTranscription(model: string, input: NormalizedRunInp
   const hasNonAudioBinary = input.attachments.some(attachment => attachment.kind !== 'audio' && attachment.kind !== 'text')
   if (hasNonAudioBinary) return false
   return modelHasOutputModality(model, modelMetas, 'transcription') || /(?:^|\/)(whisper|gpt-4o-transcribe|gpt-4o-mini-transcribe)/i.test(model)
+}
+
+function shouldUseOpenAITranscription(model: string, input: NormalizedRunInput, modelMetas?: ModelMeta[]) {
+  return shouldUseOpenRouterTranscription(model, input, modelMetas)
+}
+
+async function transcribeOpenAI(
+  baseUrl: string,
+  apiKey: string,
+  model: string,
+  input: NormalizedRunInput,
+  extraHeaders?: string
+): Promise<ApiResult> {
+  const audioAttachments = input.attachments.filter(a => a.kind === 'audio' && a.base64)
+  if (audioAttachments.length === 0) throw new Error('OpenAI transcription requires at least one audio attachment')
+
+  const url = `${baseUrl.replace(/\/+$/, '')}/v1/audio/transcriptions`
+  const extra = parseHeaders(extraHeaders)
+  const transcriptionResults: { filename: string; data: any }[] = []
+
+  for (const attachment of audioAttachments) {
+    if (!attachment.base64 || !attachment.mimeType) {
+      throw new Error(`OpenAI audio attachment "${attachment.filename}" is missing base64 data or mime type`)
+    }
+    const formData = new FormData()
+    formData.append('model', model)
+    formData.append('file', new Blob([Buffer.from(attachment.base64, 'base64') as BlobPart], { type: attachment.mimeType }), attachment.filename)
+
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${apiKey}`, ...extra },
+      body: formData,
+    })
+
+    if (!res.ok) {
+      const text = await res.text()
+      throw new Error(`${res.status} ${res.statusText}: ${text.slice(0, 500)}`)
+    }
+
+    transcriptionResults.push({ filename: attachment.filename, data: await res.json() })
+  }
+
+  const responseText = transcriptionResults.map((t) => {
+    const text = typeof t.data?.text === 'string' ? t.data.text : ''
+    if (transcriptionResults.length === 1) return text
+    return `--- ${t.filename} ---\n${text}`
+  }).filter(Boolean).join('\n\n')
+
+  return {
+    inputTokens: 0,
+    outputTokens: 0,
+    totalTokens: 0,
+    responseText,
+    error: responseText ? undefined : 'OpenAI transcription returned no text. Inspect the raw response payload for details.',
+    requestPayload: { model, transcriptionCount: audioAttachments.length },
+    requestUrl: url,
+    responsePayload: transcriptionResults,
+  }
 }
 
 async function transcribeOpenRouterAudio(

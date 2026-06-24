@@ -246,7 +246,7 @@ Examples:
 - Gemini can send image, document, audio, and video attachments through `inlineData`.
 - OpenAI-native runs (text/image/doc only) use `/v1/responses` (Responses API), `input`, top-level `instructions` for system prompt, and `max_output_tokens`.
 - Other OpenAI-compatible adapters (openrouter, deepseek, mistral) still use `/v1/chat/completions`, `messages`, and either `max_tokens` or `max_completion_tokens` for reasoning-style models.
-- OpenAI audio attachments are an exception — the Responses API does not support audio input, so they fall back to `/v1/chat/completions` with `input_audio` content parts.
+- OpenAI audio attachments: chat models (gpt-audio-*) use `/v1/chat/completions` with `input_audio`; transcription models (whisper-*, gpt-4o-transcribe-*) use `/v1/audio/transcriptions` as multipart form uploads.
 - OpenRouter is treated as PDF-capable through its universal PDF path, while image and audio support are model-dependent.
 - OpenRouter audio attachments use `input_audio` with `inputAudio: { data, format }`.
 - OpenRouter transcription-output models use `/v1/audio/transcriptions` for audio-only runs.

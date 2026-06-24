@@ -160,11 +160,10 @@ function providerHandlingDetails(provider: any, selectedModels: string[]) {
     switch (adapter.id) {
       case 'openai':
         return [
-          'Body: { model, input, instructions?, max_output_tokens: 4096 }',
-          'Instructions (optional top-level field) replaces the system role.',
-          'input is an array with a user role: [{ role: "user", content: [...] }]',
-          'Content parts: input_text (text), input_image (image_url), input_file (filename+file_data).',
-          'Audio attachments use /v1/chat/completions fallback with { model, messages, max_tokens } and input_audio content part.',
+          'Text/image/doc: /v1/responses, body { model, input, instructions?, max_output_tokens }',
+          '  Content parts: input_text, input_image, input_file.',
+          'Audio on chat models (gpt-audio*): /v1/chat/completions, body { model, messages, max_tokens } with input_audio parts.',
+          'Audio on transcription models (whisper*, gpt-4o-transcribe*): /v1/audio/transcriptions, multipart form upload.',
         ]
       case 'xai':
         return [
