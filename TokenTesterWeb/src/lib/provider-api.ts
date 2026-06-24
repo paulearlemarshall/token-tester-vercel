@@ -138,6 +138,7 @@ interface ApiResult {
   error?: string
   requestPayload?: unknown
   requestUrl?: string
+  responsePayload?: unknown
 }
 
 export async function chatCompletion(params: ChatParams) {
@@ -360,6 +361,7 @@ async function chatXaiResponses(
     responseText: parseXaiResponseText(data),
     requestPayload: body,
     requestUrl: url,
+    responsePayload: data,
   }
 }
 
@@ -391,14 +393,59 @@ async function chatOpenAICompat(
   }
 
   const data = await res.json()
+  const error = providerErrorMessage(data)
+  const responseText = extractOpenAICompatText(data)
   return {
-    inputTokens: data.usage?.prompt_tokens ?? 0,
-    outputTokens: data.usage?.completion_tokens ?? 0,
-    totalTokens: data.usage?.total_tokens ?? 0,
-    responseText: data.choices?.[0]?.message?.content ?? '',
+    inputTokens: data.usage?.prompt_tokens ?? data.usage?.input_tokens ?? 0,
+    outputTokens: data.usage?.completion_tokens ?? data.usage?.output_tokens ?? 0,
+    totalTokens: data.usage?.total_tokens ?? ((data.usage?.prompt_tokens ?? data.usage?.input_tokens ?? 0) + (data.usage?.completion_tokens ?? data.usage?.output_tokens ?? 0)),
+    responseText,
+    error: error || (!responseText ? 'Provider returned no text content. Inspect the raw response payload for details.' : undefined),
     requestPayload: body,
     requestUrl: url,
+    responsePayload: data,
   }
+}
+
+function providerErrorMessage(data: any) {
+  const error = data?.error
+  if (!error) return ''
+  if (typeof error === 'string') return error
+  return [error.message, error.code, error.type].filter(Boolean).join(' · ') || JSON.stringify(error)
+}
+
+function extractOpenAICompatText(data: any) {
+  const choice = Array.isArray(data?.choices) ? data.choices[0] : null
+  const message = choice?.message ?? choice?.delta ?? choice
+  const candidates = [
+    message?.content,
+    message?.text,
+    message?.reasoning,
+    message?.refusal,
+    choice?.text,
+    data?.output_text,
+    data?.response,
+  ]
+  for (const candidate of candidates) {
+    const text = contentToText(candidate)
+    if (text) return text
+  }
+  return ''
+}
+
+function contentToText(value: any): string {
+  if (typeof value === 'string') return value
+  if (!Array.isArray(value)) return ''
+  return value
+    .map(part => {
+      if (typeof part === 'string') return part
+      if (typeof part?.text === 'string') return part.text
+      if (typeof part?.content === 'string') return part.content
+      if (typeof part?.reasoning === 'string') return part.reasoning
+      return ''
+    })
+    .filter(Boolean)
+    .join('\n')
 }
 
 async function chatAnthropic(apiKey: string, model: string, input: NormalizedRunInput, maxTokens: number): Promise<ApiResult> {
@@ -432,6 +479,7 @@ async function chatAnthropic(apiKey: string, model: string, input: NormalizedRun
     responseText: data.content?.[0]?.text ?? '',
     requestPayload: body,
     requestUrl: 'https://api.anthropic.com/v1/messages',
+    responsePayload: data,
   }
 }
 
@@ -470,6 +518,7 @@ async function chatGemini(apiKey: string, model: string, input: NormalizedRunInp
     responseText: data.candidates?.[0]?.content?.parts?.[0]?.text ?? '',
     requestPayload: body,
     requestUrl: url,
+    responsePayload: data,
   }
 }
 

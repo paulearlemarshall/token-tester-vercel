@@ -7,6 +7,7 @@ import { webApi } from '../lib/web-api'
 import { canonicalProviderKey, effectivePricing as resolveEffectivePricing, pricingLookupKeys, type ProviderKeyInput } from '../lib/provider-key'
 import { buildRunInput, filesForRun, unsupportedAttachmentReason } from '../lib/run-input'
 import { getAttachmentCapabilities, getProviderAdapter } from '../lib/provider-registry'
+import { ResponseRenderer, responseDisplayValue } from './ResponseRenderer'
 
 function modelLozenges(providerName: string, modelId: string, meta: any, pricing: { input: number; output: number }) {
   const id = modelId.toLowerCase()
@@ -687,20 +688,6 @@ export function RunTab() {
     : 0
   const displayEntry = filteredDebugEntries.length > 0 ? filteredDebugEntries[displayIndex] : null
 
-  function renderMarkdown(text: string): string {
-    let html = text
-      .replace(/```(\w*)\n([\s\S]*?)```/g, '<pre class="bg-surface-950 rounded p-3 my-2 text-xs font-mono text-surface-200 overflow-x-auto"><code>$2</code></pre>')
-      .replace(/`([^`]+)`/g, '<code class="bg-surface-800 text-brand-gold px-1 rounded text-[11px]">$1</code>')
-      .replace(/### (.+)/g, '<h3 class="text-sm font-semibold text-surface-200 mt-3 mb-1">$1</h3>')
-      .replace(/## (.+)/g, '<h2 class="text-base font-semibold text-surface-200 mt-4 mb-1">$1</h2>')
-      .replace(/# (.+)/g, '<h1 class="text-lg font-bold text-surface-200 mt-4 mb-2">$1</h1>')
-      .replace(/\*\*(.+?)\*\*/g, '<strong class="text-surface-100">$1</strong>')
-      .replace(/\*(.+?)\*/g, '<em>$1</em>')
-      .replace(/^- (.+)/gm, '<li class="text-surface-300 ml-4 list-disc">$1</li>')
-    html = `<p class="text-surface-300 mb-2">${html.replace(/\n\n/g, '</p><p class="text-surface-300 mb-2">').replace(/\n/g, '<br/>')}</p>`
-    return html
-  }
-
   function formatLatency(ms: number): string {
     if (ms < 1000) return `${ms}ms`
     return `${(ms / 1000).toFixed(2)}s`
@@ -1228,7 +1215,9 @@ export function RunTab() {
                             {copiedIdx === -4 ? <Check size={12} className="text-emerald-400" /> : <Copy size={12} />}
                           </button>
                         </div>
-                        <div className="max-h-[500px] overflow-y-auto text-sm leading-relaxed" dangerouslySetInnerHTML={{ __html: renderMarkdown(displayEntry.response?.responseText || displayEntry.response?.content || JSON.stringify(displayEntry.response, null, 2)) }} />
+                        <div className="max-h-[500px] overflow-y-auto">
+                          <ResponseRenderer value={responseDisplayValue(displayEntry.response)} />
+                        </div>
                       </div>
                     </div>
                   )}

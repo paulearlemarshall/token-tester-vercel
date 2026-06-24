@@ -76,6 +76,7 @@ export interface ChatResult {
   error?: string
   requestPayload?: unknown
   requestUrl?: string
+  responsePayload?: unknown
 }
 
 export interface TestRun {
