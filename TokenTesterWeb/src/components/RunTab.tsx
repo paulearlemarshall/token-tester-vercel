@@ -163,7 +163,8 @@ function providerHandlingDetails(provider: any, selectedModels: string[]) {
           'Body: { model, input, instructions?, max_output_tokens: 4096 }',
           'Instructions (optional top-level field) replaces the system role.',
           'input is an array with a user role: [{ role: "user", content: [...] }]',
-          'Content parts: input_text (text), input_image (image_url), input_file (filename+file_data), input_audio (data+format).',
+          'Content parts: input_text (text), input_image (image_url), input_file (filename+file_data).',
+          'Audio attachments use /v1/chat/completions fallback with { model, messages, max_tokens } and input_audio content part.',
         ]
       case 'xai':
         return [

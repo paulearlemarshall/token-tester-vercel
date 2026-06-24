@@ -209,7 +209,9 @@ export async function chatCompletion(params: ChatParams) {
         result = await chatOpenAICompat(provider.baseUrl, apiKey, model, input, maxTokens, provider.headers)
         break
       case 'openai':
-        result = await chatOpenAIResponses(provider.baseUrl, apiKey, model, input, maxTokens, provider.headers)
+        result = hasAudioAttachments(input)
+          ? await chatOpenAICompat(provider.baseUrl, apiKey, model, input, maxTokens, provider.headers, buildOpenAIMessages)
+          : await chatOpenAIResponses(provider.baseUrl, apiKey, model, input, maxTokens, provider.headers)
         break
       case 'openrouter':
         result = shouldUseOpenRouterTranscription(model, input, provider.modelMetas)
@@ -357,6 +359,33 @@ function buildOpenAIResponsesInput(input: NormalizedRunInput) {
     }
   }
   return [{ role: 'user', content: parts }]
+}
+
+function hasAudioAttachments(input: NormalizedRunInput) {
+  return input.attachments.some(a => a.kind === 'audio')
+}
+
+function buildOpenAIMessages(input: NormalizedRunInput) {
+  const messages: any[] = []
+  if (input.systemPrompt) messages.push({ role: 'system', content: input.systemPrompt })
+  const content: any[] = [{ type: 'text', text: textWithAttachmentLabels(input) }]
+  for (const attachment of input.attachments) {
+    if (attachment.kind === 'image' && attachment.base64 && attachment.mimeType) {
+      content.push({ type: 'image_url', image_url: { url: `data:${attachment.mimeType};base64,${attachment.base64}` } })
+    } else if (attachment.kind === 'document' && attachment.base64 && attachment.mimeType) {
+      content.push({ type: 'file', file: { filename: attachment.filename, file_data: `data:${attachment.mimeType};base64,${attachment.base64}` } })
+    } else if (attachment.kind === 'audio' && attachment.base64) {
+      content.push({
+        type: 'input_audio',
+        input_audio: {
+          data: attachment.base64,
+          format: audioFormatForChatCompletion(attachment),
+        },
+      })
+    }
+  }
+  messages.push({ role: 'user', content })
+  return messages
 }
 
 function modelHasOutputModality(model: string, modelMetas: ModelMeta[] | undefined, modality: string) {

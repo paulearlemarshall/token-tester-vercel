@@ -40,8 +40,8 @@ This directory is the Vercel-deployable Next.js App Router port of the Token Tes
 ## Provider Notes
 
 - OpenAI-compatible providers (openrouter, deepseek, mistral, etc.) call `{baseUrl}/v1/models` and `{baseUrl}/v1/chat/completions`.
-- The `openai` adapter uses the Responses API at `{baseUrl}/v1/responses` with `input` (content parts: `input_text`, `input_image`, `input_file`, `input_audio`) and top-level `instructions` instead of system messages.
-- Audio attachments use `input_audio` with `{ type: "input_audio", data, format }` in the Responses API.
+- The `openai` adapter uses the Responses API at `{baseUrl}/v1/responses` with `input` (content parts: `input_text`, `input_image`, `input_file`) and top-level `instructions` instead of system messages.
+- Audio attachments are an exception: the adapter falls back to `/v1/chat/completions` with `{ model, messages, max_tokens }` and `input_audio` content parts, since the Responses API does not support audio input.
 - The `openrouter` adapter uses OpenRouter's `input_audio` content part with `inputAudio: { data, format }`.
 - OpenRouter model discovery stores `architecture.input_modalities` and `architecture.output_modalities`; audio-only runs on transcription-output models use `/v1/audio/transcriptions`.
 - xAI is configured as OpenAI-compatible at `https://api.x.ai` using `XAI_API_KEY`.
