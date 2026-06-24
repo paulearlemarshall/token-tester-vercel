@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Archive, ArrowDown, ArrowUp, BarChart3, Database, EyeOff, RefreshCw, RotateCcw, Search, Table2, Trash2 } from 'lucide-react'
+import { Archive, ArrowDown, ArrowUp, BarChart3, Database, EyeOff, RefreshCw, RotateCcw, Search, Table2, Trash2, X } from 'lucide-react'
 import {
   Bar, BarChart, CartesianGrid, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from 'recharts'
@@ -192,6 +192,18 @@ export function ResultsArchiveTab() {
     setSelectedIds(new Set())
   }
 
+  function resetFilters() {
+    setQuery('')
+    setProvider('')
+    setModel('')
+    setStatus('')
+    setSourceType('')
+    setFileName('')
+    setVisibility('active')
+    setTableView('records')
+    setSelectedIds(new Set())
+  }
+
   function SortHeader({ field, children, className }: { field: SortField; children: React.ReactNode; className?: string }) {
     const active = sortField === field
     return (
@@ -248,6 +260,9 @@ export function ResultsArchiveTab() {
           <option value="all">Active + suppressed</option>
           <option value="suppressed">Suppressed only</option>
         </select>
+        <button onClick={resetFilters} className="btn-secondary flex items-center gap-1.5">
+          <X size={15} /> Reset
+        </button>
         <div className="ml-auto flex rounded-lg border border-surface-700 bg-surface-850 p-1">
           <button onClick={() => setView('charts')} className={`px-3 py-1.5 text-xs rounded-md flex items-center gap-1.5 ${view === 'charts' ? 'bg-brand-gold text-brand-charcoal' : 'text-surface-400 hover:text-surface-100'}`}>
             <BarChart3 size={14} /> Charts
