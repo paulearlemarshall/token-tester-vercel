@@ -148,6 +148,7 @@ function providerHandlingDetails(provider: any, selectedModels: string[]) {
 
   const endpoint = (() => {
     switch (adapter.id) {
+      case 'openai': return `${baseUrl}/v1/responses`
       case 'xai': return `${baseUrl}/v1/responses`
       case 'anthropic': return 'https://api.anthropic.com/v1/messages'
       case 'gemini': return 'https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent'
@@ -157,6 +158,13 @@ function providerHandlingDetails(provider: any, selectedModels: string[]) {
 
   const requestShape = (() => {
     switch (adapter.id) {
+      case 'openai':
+        return [
+          'Body: { model, input, instructions?, max_output_tokens: 4096 }',
+          'Instructions (optional top-level field) replaces the system role.',
+          'input is an array with a user role: [{ role: "user", content: [...] }]',
+          'Content parts: input_text (text), input_image (image_url), input_file (filename+file_data), input_audio (data+format).',
+        ]
       case 'xai':
         return [
           'Body: { model, input, max_output_tokens: 4096 }',
@@ -185,14 +193,6 @@ function providerHandlingDetails(provider: any, selectedModels: string[]) {
           'Text uses { type: "text" }. Images use image_url data URLs. Documents use file_data.',
           'Audio uses { type: "input_audio", inputAudio: { data, format } } with base64 data.',
           'Audio-only runs on transcription-output models use /v1/audio/transcriptions instead of chat completions.',
-        ]
-      case 'openai':
-        return [
-          'Body: { model, messages, max_tokens: 4096 } for most models.',
-          'o*, gpt-5*, and reasoning models use max_completion_tokens instead of max_tokens.',
-          'messages include optional system role and a user content array.',
-          'Text uses { type: "text" }. Images use image_url data URLs. Documents use file_data.',
-          'Audio uses { type: "input_audio", input_audio: { data, format } } with base64 data.',
         ]
       default:
         return [

@@ -209,7 +209,7 @@ export async function chatCompletion(params: ChatParams) {
         result = await chatOpenAICompat(provider.baseUrl, apiKey, model, input, maxTokens, provider.headers)
         break
       case 'openai':
-        result = await chatOpenAICompat(provider.baseUrl, apiKey, model, input, maxTokens, provider.headers, buildOpenAIMessages)
+        result = await chatOpenAIResponses(provider.baseUrl, apiKey, model, input, maxTokens, provider.headers)
         break
       case 'openrouter':
         result = shouldUseOpenRouterTranscription(model, input, provider.modelMetas)
@@ -309,29 +309,6 @@ function audioFormatForChatCompletion(attachment: NormalizedAttachment) {
   return 'mp3'
 }
 
-function buildOpenAIMessages(input: NormalizedRunInput) {
-  const messages: any[] = []
-  if (input.systemPrompt) messages.push({ role: 'system', content: input.systemPrompt })
-  const content: any[] = [{ type: 'text', text: textWithAttachmentLabels(input) }]
-  for (const attachment of input.attachments) {
-    if (attachment.kind === 'image' && attachment.base64 && attachment.mimeType) {
-      content.push({ type: 'image_url', image_url: { url: `data:${attachment.mimeType};base64,${attachment.base64}` } })
-    } else if (attachment.kind === 'document' && attachment.base64 && attachment.mimeType) {
-      content.push({ type: 'file', file: { filename: attachment.filename, file_data: `data:${attachment.mimeType};base64,${attachment.base64}` } })
-    } else if (attachment.kind === 'audio' && attachment.base64) {
-      content.push({
-        type: 'input_audio',
-        input_audio: {
-          data: attachment.base64,
-          format: audioFormatForChatCompletion(attachment),
-        },
-      })
-    }
-  }
-  messages.push({ role: 'user', content })
-  return messages
-}
-
 function buildOpenRouterMessages(input: NormalizedRunInput) {
   const messages: any[] = []
   if (input.systemPrompt) messages.push({ role: 'system', content: input.systemPrompt })
@@ -353,6 +330,33 @@ function buildOpenRouterMessages(input: NormalizedRunInput) {
   }
   messages.push({ role: 'user', content })
   return messages
+}
+
+function buildOpenAIResponsesInput(input: NormalizedRunInput) {
+  const parts: any[] = [
+    { type: 'input_text', text: textWithAttachmentLabels(input) },
+  ]
+  for (const attachment of input.attachments) {
+    if (attachment.kind === 'image' && attachment.base64 && attachment.mimeType) {
+      parts.push({
+        type: 'input_image',
+        image_url: `data:${attachment.mimeType};base64,${attachment.base64}`,
+      })
+    } else if (attachment.kind === 'document' && attachment.base64 && attachment.mimeType) {
+      parts.push({
+        type: 'input_file',
+        filename: attachment.filename,
+        file_data: `data:${attachment.mimeType};base64,${attachment.base64}`,
+      })
+    } else if (attachment.kind === 'audio' && attachment.base64) {
+      parts.push({
+        type: 'input_audio',
+        data: attachment.base64,
+        format: audioFormatForChatCompletion(attachment),
+      })
+    }
+  }
+  return [{ role: 'user', content: parts }]
 }
 
 function modelHasOutputModality(model: string, modelMetas: ModelMeta[] | undefined, modality: string) {
@@ -621,6 +625,51 @@ async function chatXaiResponses(
       ? { stt: transcriptions.map(transcription => transcription.responsePayload), responses: data }
       : data,
   }
+}
+
+async function chatOpenAIResponses(
+  baseUrl: string,
+  apiKey: string,
+  model: string,
+  input: NormalizedRunInput,
+  maxTokens: number,
+  extraHeaders?: string
+): Promise<ApiResult> {
+  const url = `${baseUrl.replace(/\/+$/, '')}/v1/responses`
+  const extra = parseHeaders(extraHeaders)
+  const body: any = { model, input: buildOpenAIResponsesInput(input), max_output_tokens: maxTokens }
+  if (input.systemPrompt) body.instructions = input.systemPrompt
+
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}`, ...extra },
+    body: JSON.stringify(body),
+  })
+
+  if (!res.ok) {
+    const text = await res.text()
+    throw new Error(`${res.status} ${res.statusText}: ${text.slice(0, 500)}`)
+  }
+
+  const data = await res.json()
+  const responseText = parseOpenAIResponsesText(data)
+  return {
+    inputTokens: data.usage?.input_tokens ?? data.usage?.prompt_tokens ?? 0,
+    outputTokens: data.usage?.output_tokens ?? data.usage?.completion_tokens ?? 0,
+    totalTokens: data.usage?.total_tokens ?? ((data.usage?.input_tokens ?? data.usage?.prompt_tokens ?? 0) + (data.usage?.output_tokens ?? data.usage?.completion_tokens ?? 0)),
+    responseText,
+    error: !responseText ? 'Provider returned no text content. Inspect the raw response payload for details.' : undefined,
+    requestPayload: body,
+    requestUrl: url,
+    responsePayload: data,
+  }
+}
+
+function parseOpenAIResponsesText(data: any): string {
+  const lastMessage = Array.isArray(data?.output) ? data.output.at(-1) : null
+  const content = Array.isArray(lastMessage?.content) ? lastMessage.content : []
+  const textPart = content.find((part: any) => part?.type === 'output_text' && typeof part.text === 'string')
+  return textPart?.text ?? ''
 }
 
 async function chatOpenAICompat(

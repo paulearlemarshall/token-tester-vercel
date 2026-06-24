@@ -244,8 +244,9 @@ Examples:
 - Anthropic runs use `/v1/messages`, `anthropic-version`, `system`, and `messages`.
 - Gemini runs use `generateContent`, `contents`, and `generationConfig.maxOutputTokens`.
 - Gemini can send image, document, audio, and video attachments through `inlineData`.
-- OpenAI-compatible runs use `/v1/chat/completions`, `messages`, and either `max_tokens` or `max_completion_tokens` for reasoning-style models.
-- OpenAI audio attachments use `input_audio` with `input_audio: { data, format }` on audio-capable chat models.
+- OpenAI-native runs use `/v1/responses` (Responses API), `input`, top-level `instructions` for system prompt, and `max_output_tokens`.
+- Other OpenAI-compatible adapters (openrouter, deepseek, mistral) still use `/v1/chat/completions`, `messages`, and either `max_tokens` or `max_completion_tokens` for reasoning-style models.
+- OpenAI audio attachments use `input_audio` with `{ type: "input_audio", data, format }` in the Responses API.
 - OpenRouter is treated as PDF-capable through its universal PDF path, while image and audio support are model-dependent.
 - OpenRouter audio attachments use `input_audio` with `inputAudio: { data, format }`.
 - OpenRouter transcription-output models use `/v1/audio/transcriptions` for audio-only runs.
