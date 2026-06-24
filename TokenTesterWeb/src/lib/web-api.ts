@@ -35,6 +35,16 @@ export const webApi = {
     return res.json()
   },
 
+  async getArchivedResults(limit = 1000) {
+    const res = await fetch(`/api/results?limit=${encodeURIComponent(limit)}`)
+    if (!res.ok) return { records: [] }
+    return res.json()
+  },
+
+  saveArchivedResult(params: unknown) {
+    return sendJson<any>('/api/results', params)
+  },
+
   async savePricing(params: {
     serviceProvider: string
     modelId: string

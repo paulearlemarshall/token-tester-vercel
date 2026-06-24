@@ -7,6 +7,7 @@ import { ConfigureTab } from './ConfigureTab'
 import { PromptsTab } from './PromptsTab'
 import { RunTab } from './RunTab'
 import { ResultsTab } from './ResultsTab'
+import { ResultsArchiveTab } from './ResultsArchiveTab'
 import { webApi } from '../lib/web-api'
 
 export function TokenTesterApp() {
@@ -45,6 +46,7 @@ export function TokenTesterApp() {
         {activeTab === 'prompts' && <PromptsTab />}
         {activeTab === 'run' && <RunTab />}
         {activeTab === 'results' && <ResultsTab />}
+        {activeTab === 'archive' && <ResultsArchiveTab />}
       </main>
     </div>
   )

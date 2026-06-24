@@ -17,6 +17,8 @@ export interface ModelMeta {
   owned_by?: string
   context_length?: number
   modality?: string
+  inputModalities?: string[]
+  outputModalities?: string[]
 }
 
 export interface ProviderConfig {
@@ -94,7 +96,7 @@ export interface TestRun {
   priceOverride?: { input: number; output: number }
 }
 
-export type TabId = 'configure' | 'prompts' | 'run' | 'results'
+export type TabId = 'configure' | 'prompts' | 'run' | 'results' | 'archive'
 
 export type ThemeMode = 'system' | 'light' | 'dark'
 
@@ -119,6 +121,47 @@ export interface DebugEntry {
 
 export interface AppConfig {
   providers: ProviderConfig[]
+}
+
+export interface ArchivedRunResult {
+  id: number
+  runId: string
+  status: 'success' | 'error' | 'skipped' | string
+  providerId?: string | null
+  providerName: string
+  serviceProvider: string
+  model: string
+  sourceType: 'prompt' | 'file' | 'batch' | string
+  sourceLabel: string
+  systemPrompt?: string | null
+  systemPromptHash?: string | null
+  userMessage?: string | null
+  userMessageHash?: string | null
+  inputHash: string
+  fileName?: string | null
+  filePath?: string | null
+  fileSize?: number | null
+  fileType?: string | null
+  fileMimeType?: string | null
+  fileHash?: string | null
+  fileMetadata?: unknown
+  batchFiles?: unknown
+  inputTokens: number
+  outputTokens: number
+  totalTokens: number
+  localInputTokens?: number | null
+  latencyMs: number
+  inputPricePer1m?: number | null
+  outputPricePer1m?: number | null
+  estimatedCost?: number | null
+  responseText?: string | null
+  error?: string | null
+  requestPayload?: unknown
+  responsePayload?: unknown
+  runStartedAt?: string | null
+  completedAt: string
+  createdAt: string
+  updatedAt: string
 }
 
 export interface ProviderPreset {

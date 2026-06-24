@@ -62,7 +62,56 @@ await sql`create index if not exists model_price_records_effective_idx on model_
 await sql`create index if not exists model_price_records_source_idx on model_price_records (source, updated_at desc)`
 await sql`create index if not exists model_price_records_match_idx on model_price_records (match_status, match_confidence desc)`
 
-console.log('model_prices schema is ready')
+await sql`
+  create table if not exists run_results (
+    id bigserial primary key,
+    run_id text not null unique,
+    status text not null,
+    provider_id text,
+    provider_name text not null,
+    service_provider text not null,
+    model text not null,
+    source_type text not null,
+    source_label text not null,
+    system_prompt text,
+    system_prompt_hash text,
+    user_message text,
+    user_message_hash text,
+    input_hash text not null,
+    file_name text,
+    file_path text,
+    file_size bigint,
+    file_type text,
+    file_mime_type text,
+    file_hash text,
+    file_metadata jsonb,
+    batch_files jsonb,
+    input_tokens integer not null default 0,
+    output_tokens integer not null default 0,
+    total_tokens integer not null default 0,
+    local_input_tokens integer,
+    latency_ms integer not null default 0,
+    input_price_per_1m numeric(12, 6),
+    output_price_per_1m numeric(12, 6),
+    estimated_cost numeric(18, 9),
+    response_text text,
+    error text,
+    request_payload jsonb,
+    response_payload jsonb,
+    run_started_at timestamptz,
+    completed_at timestamptz not null default now(),
+    created_at timestamptz not null default now(),
+    updated_at timestamptz not null default now()
+  )
+`
+
+await sql`create index if not exists run_results_completed_idx on run_results (completed_at desc)`
+await sql`create index if not exists run_results_provider_model_idx on run_results (service_provider, model, completed_at desc)`
+await sql`create index if not exists run_results_status_idx on run_results (status, completed_at desc)`
+await sql`create index if not exists run_results_input_hash_idx on run_results (input_hash)`
+await sql`create index if not exists run_results_file_hash_idx on run_results (file_hash)`
+
+console.log('model_prices and run_results schema is ready')
 
 function loadEnv() {
   const candidates = ['.env.local', '.env.development.local']

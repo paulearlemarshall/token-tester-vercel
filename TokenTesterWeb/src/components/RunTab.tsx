@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { Play, Square, Loader2, CheckCircle, XCircle, Clock, Trash2, ChevronRight, ChevronDown, ChevronLeft, ToggleLeft, ToggleRight, Search, Copy, X, Check, ArrowUp, ArrowDown, List, FileText, RotateCcw } from 'lucide-react'
 import { useStore } from '../store'
 import type { AttachedFile, DebugEntry, FileItem, TestRun } from '../types'
-import { formatDuration, truncate } from '../utils/formatters'
+import { estimateCost, formatDuration, truncate } from '../utils/formatters'
 import { webApi } from '../lib/web-api'
 import { canonicalProviderKey, effectivePricing as resolveEffectivePricing, pricingLookupKeys, type ProviderKeyInput } from '../lib/provider-key'
 import { buildRunInput, unsupportedAttachmentReason } from '../lib/run-input'
@@ -40,6 +40,47 @@ function lozengeClass(tone: 'blue' | 'gold' | 'slate' | 'green') {
     default:
       return 'border-surface-600 bg-surface-800 text-surface-400'
   }
+}
+
+function fileKey(file: AttachedFile | null | undefined) {
+  if (!file) return ''
+  return [
+    file.path || file.name,
+    file.size,
+    file.ext,
+    file.type,
+  ].join(':')
+}
+
+function runIdentityKey(run: Pick<TestRun, 'providerId' | 'model' | 'sourceType' | 'systemPrompt' | 'userMessage' | 'file' | 'batchFiles'>) {
+  const batchKey = (run.batchFiles ?? []).map(fileKey).sort().join('|')
+  return [
+    run.providerId,
+    run.model,
+    run.sourceType,
+    run.systemPrompt,
+    run.userMessage,
+    fileKey(run.file),
+    batchKey,
+  ].join('||')
+}
+
+async function sha256Hex(value: string) {
+  const data = new TextEncoder().encode(value)
+  const hash = await crypto.subtle.digest('SHA-256', data)
+  return Array.from(new Uint8Array(hash)).map(byte => byte.toString(16).padStart(2, '0')).join('')
+}
+
+function hashableFileContent(file: AttachedFile) {
+  return file.base64 || file.content || JSON.stringify({
+    name: file.name,
+    path: file.path,
+    size: file.size,
+    ext: file.ext,
+    type: file.type,
+    mimeType: file.mimeType,
+    metadata: file.metadata ?? null,
+  })
 }
 
 export function RunTab() {
@@ -140,6 +181,70 @@ export function RunTab() {
     return resolveEffectivePricing(provider, modelId, modelPricing, builtinPricing)
   }
 
+  async function archiveRun(run: TestRun, status: TestRun['status'], result: NonNullable<TestRun['result']>, localInputTokens?: number) {
+    try {
+      const files = run.batchFiles?.length ? run.batchFiles : (run.file ? [run.file] : [])
+      const fileHashes = await Promise.all(files.map(async file => ({
+        name: file.name,
+        path: file.path,
+        size: file.size,
+        type: file.type,
+        mimeType: file.mimeType,
+        hash: await sha256Hex(hashableFileContent(file)),
+        metadata: file.metadata ?? null,
+      })))
+      const systemPromptHash = await sha256Hex(run.systemPrompt || '')
+      const userMessageHash = await sha256Hex(run.userMessage || '')
+      const inputHash = await sha256Hex(JSON.stringify({
+        systemPromptHash,
+        userMessageHash,
+        files: fileHashes.map(file => file.hash),
+      }))
+      const rate = run.priceOverride && (run.priceOverride.input > 0 || run.priceOverride.output > 0)
+        ? { ...run.priceOverride, per: '1M' }
+        : { ...effectivePricing(run.providerName, run.model), per: '1M' }
+
+      await webApi.saveArchivedResult({
+        runId: run.id,
+        status,
+        providerId: run.providerId,
+        providerName: run.providerName,
+        serviceProvider: canonicalProviderKey(run.providerName),
+        model: run.model,
+        sourceType: run.sourceType,
+        sourceLabel: run.sourceLabel,
+        systemPrompt: run.systemPrompt,
+        systemPromptHash,
+        userMessage: run.userMessage,
+        userMessageHash,
+        inputHash,
+        fileName: run.file?.name ?? (run.batchFiles ? `batch (${run.batchFiles.length})` : null),
+        filePath: run.file?.path ?? null,
+        fileSize: run.file?.size ?? (run.batchFiles ? run.batchFiles.reduce((sum, file) => sum + file.size, 0) : null),
+        fileType: run.file?.type ?? (run.batchFiles ? 'batch' : null),
+        fileMimeType: run.file?.mimeType ?? null,
+        fileHash: fileHashes.length === 1 ? fileHashes[0].hash : fileHashes.length > 1 ? await sha256Hex(fileHashes.map(file => file.hash).join('|')) : null,
+        fileMetadata: run.file?.metadata ?? null,
+        batchFiles: run.batchFiles ? fileHashes : null,
+        inputTokens: result.inputTokens,
+        outputTokens: result.outputTokens,
+        totalTokens: result.totalTokens,
+        localInputTokens: localInputTokens ?? null,
+        latencyMs: result.latencyMs,
+        inputPricePer1m: rate.input,
+        outputPricePer1m: rate.output,
+        estimatedCost: estimateCost(result.inputTokens, result.outputTokens, rate),
+        responseText: result.responseText,
+        error: result.error,
+        requestPayload: result.requestPayload,
+        responsePayload: result,
+        runStartedAt: run.timestamp,
+      })
+    } catch (err) {
+      console.error('Failed to archive run result', err)
+    }
+  }
+
   function generateQueue() {
     const testCases: { label: string; sourceType: 'prompt' | 'file' | 'batch'; userMessage: string; file: AttachedFile | null; batchFiles?: AttachedFile[] }[] = []
 
@@ -174,12 +279,13 @@ export function RunTab() {
       testCases.push({ label: '(default)', sourceType: 'prompt', userMessage: 'Hello', file: null })
     }
 
-    const runs: TestRun[] = []
+    const existingKeys = new Set(queue.map(runIdentityKey))
+    const runs: TestRun[] = [...queue]
     for (const prov of enabledProviders) {
       const selected = getSelectedModels(prov.id, prov.models)
       for (const model of selected) {
         for (const tc of testCases) {
-          runs.push({
+          const run: TestRun = {
             id: crypto.randomUUID(),
             providerId: prov.id,
             providerName: prov.name,
@@ -195,7 +301,12 @@ export function RunTab() {
             priceOverride: pricingLookupKeys(prov, model)
               .map(key => modelPricing[key])
               .find(price => price && (price.input > 0 || price.output > 0)),
-          })
+          }
+          const key = runIdentityKey(run)
+          if (!existingKeys.has(key)) {
+            existingKeys.add(key)
+            runs.push(run)
+          }
         }
       }
     }
@@ -226,10 +337,12 @@ export function RunTab() {
 
     const skipReason = unsupportedAttachmentReason(prov, run)
     if (skipReason) {
+      const skippedResult = { inputTokens: 0, outputTokens: 0, totalTokens: 0, responseText: '', latencyMs: 0, error: skipReason }
       updateRun(run.id, {
         status: 'skipped',
-        result: { inputTokens: 0, outputTokens: 0, totalTokens: 0, responseText: '', latencyMs: 0, error: skipReason },
+        result: skippedResult,
       })
+      await archiveRun(run, 'skipped', skippedResult)
       setProgress((p: any) => ({ ...p, completed: p.completed + 1 }))
       return
     }
@@ -254,18 +367,21 @@ export function RunTab() {
       }
 
       if (result.error && /invalid.*(mime|image|format)|file.*data.*missing|unknown variant.*(image_url|file)|expected `text`/i.test(result.error)) {
+        const skippedResult = {
+          inputTokens: 0,
+          outputTokens: 0,
+          totalTokens: 0,
+          responseText: '',
+          latencyMs: 0,
+          error: `${prov.name} rejected the attachment for ${run.model}; skipped instead of retrying with a placeholder.`,
+          requestPayload: result.requestPayload,
+        }
         updateRun(run.id, {
           status: 'skipped',
-          result: {
-            inputTokens: 0,
-            outputTokens: 0,
-            totalTokens: 0,
-            responseText: '',
-            latencyMs: 0,
-            error: `${prov.name} rejected the attachment for ${run.model}; skipped instead of retrying with a placeholder.`,
-          },
+          result: skippedResult,
           localInputTokens: undefined,
         })
+        await archiveRun(run, 'skipped', skippedResult)
         setProgress((p: any) => ({ ...p, completed: p.completed + 1 }))
         return
       }
@@ -294,16 +410,20 @@ export function RunTab() {
         localTokens = await webApi.countTokens(fullText)
       } catch { /* ignore */ }
 
+      const status = result.error ? 'error' : 'success'
       updateRun(run.id, {
-        status: result.error ? 'error' : 'success',
+        status,
         result,
         localInputTokens: localTokens || undefined,
       })
+      await archiveRun(run, status, result, localTokens || undefined)
     } catch (err: any) {
+      const errorResult = { inputTokens: 0, outputTokens: 0, totalTokens: 0, responseText: '', latencyMs: 0, error: err.message ?? String(err) }
       updateRun(run.id, {
         status: 'error',
-        result: { inputTokens: 0, outputTokens: 0, totalTokens: 0, responseText: '', latencyMs: 0, error: err.message ?? String(err) },
+        result: errorResult,
       })
+      await archiveRun(run, 'error', errorResult)
     }
 
     setProgress((p: any) => ({ ...p, completed: p.completed + 1 }))
@@ -311,15 +431,14 @@ export function RunTab() {
 
   async function runAll() {
     if (queue.length === 0) return
+    const pendingRuns = queue.filter((r: TestRun) => r.status === 'queued')
+    if (pendingRuns.length === 0) return
     setIsRunning(true)
-    setProgress({ completed: 0, total: queue.length })
+    setProgress({ completed: 0, total: pendingRuns.length })
     clearDebugEntries()
 
-    const updated = queue.map((r: any) => ({ ...r, status: 'queued' as const, result: undefined, localInputTokens: undefined }))
-    setQueue(updated)
-
-    for (let i = 0; i < updated.length; i++) {
-      const run = updated[i]
+    for (let i = 0; i < pendingRuns.length; i++) {
+      const run = pendingRuns[i]
       if (!useStore.getState().isRunning) break
       await executeRun(run)
     }
@@ -337,6 +456,13 @@ export function RunTab() {
 
   function removeRun(id: string) {
     setQueue(queue.filter((r: TestRun) => r.id !== id))
+  }
+
+  function clearRuns() {
+    clearQueue()
+    clearDebugEntries()
+    setProgress({ completed: 0, total: 0 })
+    setOutputIndex(0)
   }
 
   function stopRun() { setIsRunning(false) }
@@ -440,15 +566,15 @@ export function RunTab() {
                 <Clock size={16} /> Generate Queue
               </button>
               {!isRunning ? (
-                <button onClick={runAll} disabled={queue.length === 0} className="btn-success flex items-center gap-1.5">
-                  <Play size={16} /> Run All ({queue.length})
+                <button onClick={runAll} disabled={queuedCount === 0} className="btn-success flex items-center gap-1.5">
+                  <Play size={16} /> Run All ({queuedCount})
                 </button>
               ) : (
                 <button onClick={stopRun} className="btn-danger flex items-center gap-1.5">
                   <Square size={16} /> Stop
                 </button>
               )}
-              <button onClick={clearQueue} disabled={isRunning} className="btn-danger flex items-center gap-1.5">
+              <button onClick={clearRuns} disabled={isRunning} className="btn-danger flex items-center gap-1.5">
                 <Trash2 size={16} /> Clear
               </button>
             </div>

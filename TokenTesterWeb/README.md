@@ -10,6 +10,7 @@ The app is built for repeated comparison work:
 - Select model subsets per provider.
 - Queue prompt runs and file runs across many model/provider combinations.
 - Collect response text, token counts, latency, and cost estimates.
+- Persist completed run results with prompt/file checksums, provider/model metadata, output text, token counts, latency, and cost.
 - Inspect and override pricing from the app itself.
 - Store pricing records in Neon with source precedence and matching evidence.
 
@@ -38,10 +39,12 @@ https://token-tester-web.vercel.app
 - `src/components/PromptsTab.tsx`: prompt and file input management.
 - `src/components/RunTab.tsx`: model selection, queue creation, unsupported attachment skips, retry actions, and per-model price edits. It builds normalized run inputs rather than provider wire payloads.
 - `src/components/ResultsTab.tsx`: run results, summaries, charts, and exports.
+- `src/components/ResultsArchiveTab.tsx`: persisted results archive with smart filtering, sortable rows, and charts.
 - `src/components/PricingNavigator.tsx`: provider/model price browser with source records, evidence, and sorting.
 - `src/components/layout/Sidebar.tsx`: primary navigation.
 - `src/lib/provider-api.ts`: server-side provider model discovery and provider wire adapters.
 - `src/lib/pricing.ts`: Neon pricing read/write logic.
+- `src/lib/run-results.ts`: Neon run-result archive schema, reads, and upserts.
 - `src/lib/provider-registry.ts`: adapter IDs, provider inference, canonical provider identity, and attachment capabilities.
 - `src/lib/run-input.ts`: normalized prompt/file input builder and unsupported attachment checks.
 - `src/lib/pricing-match.ts`: canonical provider keys, pricing lookup keys, and effective price fallback logic.
@@ -53,7 +56,7 @@ https://token-tester-web.vercel.app
 - `src/utils/constants.ts`: provider presets and labels.
 - `src/utils/formatters.ts`: display formatting helpers.
 - `src/types.ts`: shared app and API types.
-- `scripts/setup-pricing-db.mjs`: creates the Neon pricing tables and indexes.
+- `scripts/setup-pricing-db.mjs`: creates the Neon pricing and run-result archive tables and indexes.
 - `scripts/seed-pricing.mjs`: imports pricing JSON, NDJSON, or `llm-prices` into Neon.
 
 ## Request Flow
@@ -122,6 +125,52 @@ The server-side adapter then serializes that neutral input:
 
 Debug output records the provider wire request returned by the server adapter when available, so the Run tab can inspect the actual payload sent to the provider.
 
+## Queue and Result Persistence
+
+The Run tab treats the queue as accumulated work:
+
+- `Generate Queue` adds missing provider/model/test-case combinations without deleting existing runs.
+- Existing success, error, skipped, and queued rows are preserved when more models are selected and the queue is generated again.
+- `Run All` executes only rows still marked `queued`; completed work is not reset or re-run.
+- Individual rows can still be retried.
+- `Clear` is the explicit reset action and removes queue state, debug output, and progress.
+
+When a run reaches a terminal state (`success`, `error`, or `skipped`), the browser computes SHA-256 checksums and posts the archived record to `POST /api/results`.
+
+Checksums are stored for:
+
+- The system prompt.
+- The user/custom prompt text.
+- The combined input identity.
+- Single files, using available base64 or text content.
+- Batch file groups, using a deterministic combined hash of each file hash.
+
+The archived record also stores:
+
+- Provider ID, provider name, canonical service provider, and model.
+- Source type and source label.
+- Prompt text and prompt hashes.
+- File name, path, size, type, MIME type, metadata, and file hash.
+- Batch file metadata and hashes.
+- Input, output, total, and local token counts.
+- Latency, pricing used, and estimated cost.
+- Response text, error text, provider request payload, and response payload.
+- Run start and completion timestamps.
+
+`GET /api/results` returns recent archived records for the Results Archive tab. The route lazily creates the archive table if it is missing, so a deployed app can begin archiving before `npm run db:setup` has been run manually.
+
+## Results Archive
+
+The Results Archive tab is the persistent reporting surface for historical runs.
+
+It supports:
+
+- Free-text smart filtering across provider, model, source, file name/path, hashes, output text, and errors.
+- Facet filters for provider, model, status, and source type.
+- Sortable result rows for completion time, provider, model, status, source, file, token counts, latency, and estimated cost.
+- Summary metrics for run count, success/error/skipped count, tokens, cost, and average latency.
+- Charts for cost by model, average latency by model, tokens by provider, and runs by status.
+
 ## Model Discovery
 
 `POST /api/models` returns provider-specific model lists and metadata.
@@ -188,11 +237,57 @@ model_price_records (
 )
 ```
 
+Run archives are stored in:
+
+```sql
+run_results (
+  run_id text not null unique,
+  status text not null,
+  provider_id text,
+  provider_name text not null,
+  service_provider text not null,
+  model text not null,
+  source_type text not null,
+  source_label text not null,
+  system_prompt text,
+  system_prompt_hash text,
+  user_message text,
+  user_message_hash text,
+  input_hash text not null,
+  file_name text,
+  file_path text,
+  file_size bigint,
+  file_type text,
+  file_mime_type text,
+  file_hash text,
+  file_metadata jsonb,
+  batch_files jsonb,
+  input_tokens integer,
+  output_tokens integer,
+  total_tokens integer,
+  local_input_tokens integer,
+  latency_ms integer,
+  input_price_per_1m numeric(12, 6),
+  output_price_per_1m numeric(12, 6),
+  estimated_cost numeric(18, 9),
+  response_text text,
+  error text,
+  request_payload jsonb,
+  response_payload jsonb,
+  run_started_at timestamptz,
+  completed_at timestamptz,
+  created_at timestamptz,
+  updated_at timestamptz
+)
+```
+
 Prices are stored as USD per 1 million tokens.
 
 - `GET /api/pricing` returns the effective flattened map by selecting the highest-priority source record per provider/model.
 - `GET /api/pricing/records` returns all seed/live/manual records for the Pricing navigator.
 - `PUT /api/pricing` upserts one model price into Neon.
+- `GET /api/results` returns archived run records.
+- `POST /api/results` upserts a completed run archive row.
 
 Source priority is:
 

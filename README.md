@@ -13,6 +13,7 @@ https://token-tester-web.vercel.app
 - Configures multiple providers and discovers their models.
 - Runs prompt and file-based tests across selected models.
 - Measures latency, token counts, and estimated cost.
+- Archives completed run results in Neon with prompt/file checksums, output text, token counts, latency, pricing, and provider/model metadata.
 - Stores pricing in Neon Postgres with manual, seeded, and provider-discovered overrides.
 - Skips unsupported attachments instead of forcing placeholder retries.
 - Surfaces raw pricing records, precedence, and evidence in a navigator UI.
@@ -39,6 +40,7 @@ vercel deploy --prod --yes
 - OpenRouter PDFs are handled through OpenRouter's universal PDF parsing path.
 - xAI / Grok requests use the Responses API path in the web app.
 - The Pricing navigator is sortable and shows effective values plus underlying records.
+- The Results Archive tab slices persisted run history by provider, model, status, source, file, hashes, output text, and errors.
 
 ## Documentation
 
