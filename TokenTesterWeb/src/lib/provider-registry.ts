@@ -27,19 +27,19 @@ const ADAPTERS: Record<ProviderAdapterId, ProviderAdapter> = {
     id: 'openai',
     protocol: 'openai-compat',
     canonicalProviderKey: 'openai',
-    capabilities: { supportsImages: true, supportsDocuments: true, supportsAudio: false, supportsVideo: false, requiresTextOnlyAttachments: false },
+    capabilities: { supportsImages: true, supportsDocuments: true, supportsAudio: true, supportsVideo: false, requiresTextOnlyAttachments: false },
   },
   openrouter: {
     id: 'openrouter',
     protocol: 'openai-compat',
     canonicalProviderKey: 'openrouter',
-    capabilities: { supportsImages: true, supportsDocuments: true, supportsAudio: false, supportsVideo: false, requiresTextOnlyAttachments: false },
+    capabilities: { supportsImages: true, supportsDocuments: true, supportsAudio: true, supportsVideo: false, requiresTextOnlyAttachments: false },
   },
   xai: {
     id: 'xai',
     protocol: 'openai-compat',
     canonicalProviderKey: 'xai',
-    capabilities: { supportsImages: true, supportsDocuments: true, supportsAudio: false, supportsVideo: false, requiresTextOnlyAttachments: false },
+    capabilities: { supportsImages: true, supportsDocuments: true, supportsAudio: true, supportsVideo: false, requiresTextOnlyAttachments: false },
   },
   anthropic: {
     id: 'anthropic',

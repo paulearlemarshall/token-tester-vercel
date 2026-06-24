@@ -163,6 +163,7 @@ function providerHandlingDetails(provider: any, selectedModels: string[]) {
           'input contains optional system message plus user content parts.',
           'Text uses input_text. Images use input_image with data URLs.',
           'Documents are uploaded first to /v1/files, then referenced as input_file by file_id.',
+          'Audio is transcribed first through /v1/stt, then the transcript is sent as text.',
         ]
       case 'anthropic':
         return [
@@ -176,6 +177,21 @@ function providerHandlingDetails(provider: any, selectedModels: string[]) {
           'Body: { contents: [{ role: "user", parts }], generationConfig: { maxOutputTokens: 4096 } }',
           'System prompt is inserted as a text part before the user message.',
           'Images, documents, audio, and video use inlineData with mimeType and base64 data.',
+        ]
+      case 'openrouter':
+        return [
+          'Body: { model, messages, max_tokens: 4096 } for most models.',
+          'messages include optional system role and a user content array.',
+          'Text uses { type: "text" }. Images use image_url data URLs. Documents use file_data.',
+          'Audio uses { type: "input_audio", inputAudio: { data, format } } with base64 data.',
+        ]
+      case 'openai':
+        return [
+          'Body: { model, messages, max_tokens: 4096 } for most models.',
+          'o*, gpt-5*, and reasoning models use max_completion_tokens instead of max_tokens.',
+          'messages include optional system role and a user content array.',
+          'Text uses { type: "text" }. Images use image_url data URLs. Documents use file_data.',
+          'Audio uses { type: "input_audio", input_audio: { data, format } } with base64 data.',
         ]
       default:
         return [
@@ -208,9 +224,11 @@ function providerHandlingDetails(provider: any, selectedModels: string[]) {
   if (adapter.id === 'openrouter') {
     attachmentRules.push('OpenRouter is treated as document-capable for PDFs through its universal PDF parsing path.')
     attachmentRules.push('OpenRouter image support is model-dependent; the app sends image_url for image-capable use, and provider rejection is marked skipped rather than retried with placeholders.')
+    attachmentRules.push('OpenRouter audio support is model-dependent; the app sends base64 input_audio with the audio format inferred from the filename or MIME type.')
   }
   if (adapter.id === 'xai') {
     attachmentRules.push('xAI always uses the Responses API in this app; PDFs are not sent through chat completions.')
+    attachmentRules.push('xAI audio files are transcribed with the Grok STT REST endpoint before the transcript is sent to the response model.')
   }
   if (deepseekRouted.length > 0) {
     attachmentRules.push(`DeepSeek-routed model IDs are forced text-only: ${deepseekRouted.slice(0, 4).join(', ')}${deepseekRouted.length > 4 ? ', ...' : ''}.`)

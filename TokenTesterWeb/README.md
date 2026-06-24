@@ -201,14 +201,14 @@ Built-in providers:
 
 | Provider | Adapter ID | API key env | Notes |
 | --- | --- | --- | --- |
-| OpenAI | `openai` | `OPENAI_API_KEY` | OpenAI-compatible chat completions with OpenAI-specific file capability rules. |
-| OpenRouter | `openrouter` | `OPENROUTER_API_KEY` | OpenAI-compatible API plus OpenRouter model metadata and universal PDF handling. |
+| OpenAI | `openai` | `OPENAI_API_KEY` | OpenAI chat completions with OpenAI-specific file/audio capability rules. |
+| OpenRouter | `openrouter` | `OPENROUTER_API_KEY` | OpenAI-compatible API plus OpenRouter model metadata, universal PDF handling, and OpenRouter-specific audio payloads. |
 | SS&C AI Gateway | `ssnc-ai-gateway` | `SSC_CLOUD_API_KEY` | OpenAI-compatible gateway with optional project header. |
 | Anthropic | `anthropic` | `ANTHROPIC_API_KEY` | Uses Anthropic Messages API. |
 | Google Gemini | `gemini` | `GEMINI_API_KEY` | Uses Google Generative Language `generateContent`. |
 | DeepSeek | `deepseek` | `DEEPSEEK_API_KEY` | Treated as text-only. |
 | Mistral | `mistral` | `MISTRAL_API_KEY` | OpenAI-compatible chat completions. |
-| xAI | `xai` | `XAI_API_KEY` | Uses xAI Responses API for runs, including document input. |
+| xAI | `xai` | `XAI_API_KEY` | Uses xAI Responses API for runs, including document input; audio files are transcribed through xAI STT first. |
 | Custom OpenAI-compatible | `custom-openai-compatible` | user-defined | Conservative capabilities until verified. |
 
 Provider behavior is controlled by adapter ID, not only the broad protocol family. This matters because OpenAI-compatible providers can differ materially in file support, pricing metadata, headers, payload fields, and model-specific restrictions.
@@ -238,11 +238,14 @@ The inspector shows:
 Examples:
 
 - xAI runs use `/v1/responses`, upload PDFs/documents to `/v1/files`, and reference them as `input_file`.
+- xAI audio attachments are sent to `/v1/stt` as multipart uploads, then the transcript is passed into the Responses API run.
 - Anthropic runs use `/v1/messages`, `anthropic-version`, `system`, and `messages`.
 - Gemini runs use `generateContent`, `contents`, and `generationConfig.maxOutputTokens`.
 - Gemini can send image, document, audio, and video attachments through `inlineData`.
 - OpenAI-compatible runs use `/v1/chat/completions`, `messages`, and either `max_tokens` or `max_completion_tokens` for reasoning-style models.
-- OpenRouter is treated as PDF-capable through its universal PDF path, while image support is model-dependent.
+- OpenAI audio attachments use `input_audio` with `input_audio: { data, format }` on audio-capable chat models.
+- OpenRouter is treated as PDF-capable through its universal PDF path, while image and audio support are model-dependent.
+- OpenRouter audio attachments use `input_audio` with `inputAudio: { data, format }`.
 - DeepSeek-routed models are treated as text-only.
 
 ## File And Attachment Handling
@@ -260,8 +263,11 @@ Attachment kinds:
 Provider behavior:
 
 - OpenRouter PDFs use OpenRouter's universal PDF handling path.
+- OpenAI audio files use Chat Completions `input_audio` parts with base64 data and inferred audio format.
+- OpenRouter audio files use OpenRouter's `inputAudio` variant with base64 data and inferred audio format.
 - xAI PDFs use the Responses API, with file upload and `input_file` references.
 - xAI images use `input_image`.
+- xAI audio files use the REST `/v1/stt` transcription endpoint before the transcript is appended to the response prompt.
 - Anthropic images/documents use base64 source blocks.
 - Gemini binary files use `inlineData`.
 - Gemini audio and video files use `inlineData` with the browser-provided MIME type.

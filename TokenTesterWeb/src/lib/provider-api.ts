@@ -172,13 +172,17 @@ export async function chatCompletion(params: ChatParams) {
       case 'gemini':
         result = await chatGemini(apiKey, model, input, maxTokens)
         break
-      case 'openai':
-      case 'openrouter':
       case 'deepseek':
       case 'mistral':
       case 'ssnc-ai-gateway':
       case 'custom-openai-compatible':
         result = await chatOpenAICompat(provider.baseUrl, apiKey, model, input, maxTokens, provider.headers)
+        break
+      case 'openai':
+        result = await chatOpenAICompat(provider.baseUrl, apiKey, model, input, maxTokens, provider.headers, buildOpenAIMessages)
+        break
+      case 'openrouter':
+        result = await chatOpenAICompat(provider.baseUrl, apiKey, model, input, maxTokens, provider.headers, buildOpenRouterMessages)
         break
       default:
         throw new Error(`Unknown provider adapter: ${adapter.id}`)
@@ -257,6 +261,68 @@ function buildOpenAICompatMessages(input: NormalizedRunInput) {
   return messages
 }
 
+function audioFormatForChatCompletion(attachment: NormalizedAttachment) {
+  const ext = attachment.filename.toLowerCase().match(/\.([a-z0-9]+)$/)?.[1]
+  if (ext === 'oga' || ext === 'opus') return 'ogg'
+  if (ext) return ext
+
+  const mimeType = attachment.mimeType?.toLowerCase() ?? ''
+  if (mimeType.includes('mpeg')) return 'mp3'
+  if (mimeType.includes('wav')) return 'wav'
+  if (mimeType.includes('aiff') || mimeType.includes('aifc')) return 'aiff'
+  if (mimeType.includes('aac')) return 'aac'
+  if (mimeType.includes('ogg') || mimeType.includes('opus')) return 'ogg'
+  if (mimeType.includes('flac')) return 'flac'
+  if (mimeType.includes('mp4') || mimeType.includes('m4a')) return 'm4a'
+  return 'mp3'
+}
+
+function buildOpenAIMessages(input: NormalizedRunInput) {
+  const messages: any[] = []
+  if (input.systemPrompt) messages.push({ role: 'system', content: input.systemPrompt })
+  const content: any[] = [{ type: 'text', text: textWithAttachmentLabels(input) }]
+  for (const attachment of input.attachments) {
+    if (attachment.kind === 'image' && attachment.base64 && attachment.mimeType) {
+      content.push({ type: 'image_url', image_url: { url: `data:${attachment.mimeType};base64,${attachment.base64}` } })
+    } else if (attachment.kind === 'document' && attachment.base64 && attachment.mimeType) {
+      content.push({ type: 'file', file: { filename: attachment.filename, file_data: `data:${attachment.mimeType};base64,${attachment.base64}` } })
+    } else if (attachment.kind === 'audio' && attachment.base64) {
+      content.push({
+        type: 'input_audio',
+        input_audio: {
+          data: attachment.base64,
+          format: audioFormatForChatCompletion(attachment),
+        },
+      })
+    }
+  }
+  messages.push({ role: 'user', content })
+  return messages
+}
+
+function buildOpenRouterMessages(input: NormalizedRunInput) {
+  const messages: any[] = []
+  if (input.systemPrompt) messages.push({ role: 'system', content: input.systemPrompt })
+  const content: any[] = [{ type: 'text', text: textWithAttachmentLabels(input) }]
+  for (const attachment of input.attachments) {
+    if (attachment.kind === 'image' && attachment.base64 && attachment.mimeType) {
+      content.push({ type: 'image_url', image_url: { url: `data:${attachment.mimeType};base64,${attachment.base64}` } })
+    } else if (attachment.kind === 'document' && attachment.base64 && attachment.mimeType) {
+      content.push({ type: 'file', file: { filename: attachment.filename, file_data: `data:${attachment.mimeType};base64,${attachment.base64}` } })
+    } else if (attachment.kind === 'audio' && attachment.base64) {
+      content.push({
+        type: 'input_audio',
+        inputAudio: {
+          data: attachment.base64,
+          format: audioFormatForChatCompletion(attachment),
+        },
+      })
+    }
+  }
+  messages.push({ role: 'user', content })
+  return messages
+}
+
 function parseXaiResponseText(data: any): string {
   const lastMessage = Array.isArray(data?.output) ? data.output.at(-1) : null
   const content = Array.isArray(lastMessage?.content) ? lastMessage.content : []
@@ -328,6 +394,88 @@ async function buildXaiResponsesInput(
   return input
 }
 
+interface XaiAudioTranscription {
+  filename: string
+  text: string
+  requestPayload: unknown
+  responsePayload: unknown
+}
+
+async function transcribeXaiAudioAttachment(
+  baseUrl: string,
+  apiKey: string,
+  attachment: NormalizedAttachment,
+  extraHeaders?: string
+): Promise<XaiAudioTranscription> {
+  if (!attachment.base64 || !attachment.mimeType) {
+    throw new Error(`xAI audio attachment "${attachment.filename}" must include base64 data and mime type`)
+  }
+
+  const url = `${baseUrl.replace(/\/+$/, '')}/v1/stt`
+  const body = new FormData()
+  body.append('format', 'true')
+  body.append('language', 'en')
+  body.append('file', new Blob([Buffer.from(attachment.base64, 'base64')], { type: attachment.mimeType }), attachment.filename)
+  const extra = parseHeaders(extraHeaders)
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${apiKey}`, ...extra },
+    body,
+  })
+
+  if (!res.ok) {
+    const text = await res.text()
+    throw new Error(`${res.status} ${res.statusText}: ${text.slice(0, 500)}`)
+  }
+
+  const data = await res.json()
+  const transcript = typeof data?.text === 'string' ? data.text : ''
+  if (!transcript) throw new Error(`xAI STT returned no transcript for "${attachment.filename}"`)
+
+  return {
+    filename: attachment.filename,
+    text: transcript,
+    requestPayload: {
+      url,
+      filename: attachment.filename,
+      mimeType: attachment.mimeType,
+      format: true,
+      language: 'en',
+    },
+    responsePayload: data,
+  }
+}
+
+async function transcribeXaiAudioAttachments(
+  inputRun: NormalizedRunInput,
+  baseUrl: string,
+  apiKey: string,
+  extraHeaders?: string
+) {
+  const audioAttachments = inputRun.attachments.filter(attachment => attachment.kind === 'audio')
+  if (audioAttachments.length === 0) {
+    return { inputRun, transcriptions: [] as XaiAudioTranscription[] }
+  }
+
+  const transcriptions = await Promise.all(
+    audioAttachments.map(attachment => transcribeXaiAudioAttachment(baseUrl, apiKey, attachment, extraHeaders))
+  )
+  return {
+    inputRun: {
+      ...inputRun,
+      attachments: [
+        ...inputRun.attachments.filter(attachment => attachment.kind !== 'audio'),
+        ...transcriptions.map(transcription => ({
+          kind: 'text' as const,
+          filename: `${transcription.filename} transcript`,
+          text: transcription.text,
+        })),
+      ],
+    },
+    transcriptions,
+  }
+}
+
 async function chatXaiResponses(
   baseUrl: string,
   apiKey: string,
@@ -337,7 +485,8 @@ async function chatXaiResponses(
   extraHeaders?: string
 ): Promise<ApiResult> {
   const url = `${baseUrl.replace(/\/+$/, '')}/v1/responses`
-  const input = await buildXaiResponsesInput(inputRun, baseUrl, apiKey, extraHeaders)
+  const { inputRun: responseInput, transcriptions } = await transcribeXaiAudioAttachments(inputRun, baseUrl, apiKey, extraHeaders)
+  const input = await buildXaiResponsesInput(responseInput, baseUrl, apiKey, extraHeaders)
   const extra = parseHeaders(extraHeaders)
   const body = { model, input, max_output_tokens: maxTokens }
 
@@ -359,9 +508,13 @@ async function chatXaiResponses(
     outputTokens,
     totalTokens,
     responseText: parseXaiResponseText(data),
-    requestPayload: body,
+    requestPayload: transcriptions.length > 0
+      ? { stt: transcriptions.map(transcription => transcription.requestPayload), responses: body }
+      : body,
     requestUrl: url,
-    responsePayload: data,
+    responsePayload: transcriptions.length > 0
+      ? { stt: transcriptions.map(transcription => transcription.responsePayload), responses: data }
+      : data,
   }
 }
 
@@ -371,11 +524,12 @@ async function chatOpenAICompat(
   model: string,
   input: NormalizedRunInput,
   maxTokens: number,
-  extraHeaders?: string
+  extraHeaders?: string,
+  messageBuilder: (input: NormalizedRunInput) => unknown[] = buildOpenAICompatMessages
 ): Promise<ApiResult> {
   const url = `${baseUrl.replace(/\/+$/, '')}/v1/chat/completions`
   const extra = parseHeaders(extraHeaders)
-  const body: any = { model, messages: buildOpenAICompatMessages(input), max_tokens: maxTokens }
+  const body: any = { model, messages: messageBuilder(input), max_tokens: maxTokens }
   if (needsCompletionTokens(model)) {
     delete body.max_tokens
     body.max_completion_tokens = maxTokens

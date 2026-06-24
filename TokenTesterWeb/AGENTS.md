@@ -40,9 +40,12 @@ This directory is the Vercel-deployable Next.js App Router port of the Token Tes
 ## Provider Notes
 
 - OpenAI-compatible providers call `{baseUrl}/v1/models` and `{baseUrl}/v1/chat/completions`.
+- The `openai` adapter uses OpenAI's `input_audio` content part with `input_audio: { data, format }` for audio-capable chat models.
+- The `openrouter` adapter uses OpenRouter's `input_audio` content part with `inputAudio: { data, format }`.
 - xAI is configured as OpenAI-compatible at `https://api.x.ai` using `XAI_API_KEY`.
+- xAI runs use `/v1/responses`; audio attachments are first transcribed through `/v1/stt`, then sent as transcript text to the response model.
 - xAI model discovery returns prices in USD cents per 100M tokens; divide by `10000` before storing as USD per 1M tokens.
-- Anthropic and Gemini use provider-specific adapters.
+- Anthropic and Gemini use provider-specific adapters; Gemini sends audio/video/image/document files as `inlineData`.
 - Treat DeepSeek providers and DeepSeek-routed models as text-only.
 - Do not retry unsupported binary attachments as placeholder text. Mark unsupported or provider-rejected attachments as `skipped` with zero tokens/cost.
 - Be conservative with document support for generic OpenAI-compatible gateways; only allow PDFs/DOCX when the provider schema is known to support the request shape.
