@@ -773,6 +773,9 @@ async function chatOpenAICompat(
   const url = `${baseUrl.replace(/\/+$/, '')}/v1/chat/completions`
   const extra = parseHeaders(extraHeaders)
   const body: any = { model, messages: messageBuilder(input), max_tokens: maxTokens }
+  if (/^gpt-audio/i.test(model)) {
+    body.modalities = ['text']
+  }
   if (needsCompletionTokens(model)) {
     delete body.max_tokens
     body.max_completion_tokens = maxTokens
