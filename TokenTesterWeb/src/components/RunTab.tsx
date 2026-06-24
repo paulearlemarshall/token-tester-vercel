@@ -5,7 +5,8 @@ import type { AttachedFile, DebugEntry, FileItem, TestRun } from '../types'
 import { estimateCost, formatDuration, truncate } from '../utils/formatters'
 import { webApi } from '../lib/web-api'
 import { canonicalProviderKey, effectivePricing as resolveEffectivePricing, pricingLookupKeys, type ProviderKeyInput } from '../lib/provider-key'
-import { buildRunInput, unsupportedAttachmentReason } from '../lib/run-input'
+import { buildRunInput, filesForRun, unsupportedAttachmentReason } from '../lib/run-input'
+import { getAttachmentCapabilities, getProviderAdapter } from '../lib/provider-registry'
 
 function modelLozenges(providerName: string, modelId: string, meta: any, pricing: { input: number; output: number }) {
   const id = modelId.toLowerCase()
@@ -83,6 +84,141 @@ function hashableFileContent(file: AttachedFile) {
   })
 }
 
+interface PayloadMediaSummary {
+  pdfSent: boolean
+  pdfFileSize: number | null
+  imageSent: boolean
+  imageFileSize: number | null
+  videoSent: boolean
+  videoFileSize: number | null
+  audioSent: boolean
+  audioFileSize: number | null
+}
+
+const EMPTY_PAYLOAD_MEDIA: PayloadMediaSummary = {
+  pdfSent: false,
+  pdfFileSize: null,
+  imageSent: false,
+  imageFileSize: null,
+  videoSent: false,
+  videoFileSize: null,
+  audioSent: false,
+  audioFileSize: null,
+}
+
+const VIDEO_EXTS = new Set(['.mp4', '.mov', '.m4v', '.avi', '.mkv', '.webm', '.mpeg', '.mpg', '.wmv', '.flv'])
+const AUDIO_EXTS = new Set(['.mp3', '.wav', '.m4a', '.aac', '.flac', '.ogg', '.oga', '.opus', '.wma', '.aiff'])
+
+function payloadMediaSummary(files: AttachedFile[]): PayloadMediaSummary {
+  const summary = { ...EMPTY_PAYLOAD_MEDIA }
+  for (const file of files) {
+    const size = Number.isFinite(file.size) ? file.size : 0
+    const ext = (file.ext || '').toLowerCase()
+    const mimeType = (file.mimeType || '').toLowerCase()
+
+    if (ext === '.pdf' || mimeType === 'application/pdf') {
+      summary.pdfSent = true
+      summary.pdfFileSize = (summary.pdfFileSize ?? 0) + size
+    } else if (file.type === 'image' || mimeType.startsWith('image/')) {
+      summary.imageSent = true
+      summary.imageFileSize = (summary.imageFileSize ?? 0) + size
+    } else if (mimeType.startsWith('video/') || VIDEO_EXTS.has(ext)) {
+      summary.videoSent = true
+      summary.videoFileSize = (summary.videoFileSize ?? 0) + size
+    } else if (mimeType.startsWith('audio/') || AUDIO_EXTS.has(ext)) {
+      summary.audioSent = true
+      summary.audioFileSize = (summary.audioFileSize ?? 0) + size
+    }
+  }
+  return summary
+}
+
+function usesCompletionTokensParam(model: string) {
+  return /^o\d/i.test(model) || /^gpt-5/i.test(model) || model.toLowerCase().includes('reasoning')
+}
+
+function providerHandlingDetails(provider: any, selectedModels: string[]) {
+  const adapter = getProviderAdapter(provider)
+  const caps = getAttachmentCapabilities(provider)
+  const baseUrl = provider.baseUrl?.replace(/\/+$/, '') || ''
+  const selected = selectedModels.length > 0 ? selectedModels : provider.models ?? []
+  const deepseekRouted = selected.filter((model: string) => model.toLowerCase().includes('deepseek'))
+  const completionTokenModels = selected.filter(usesCompletionTokensParam)
+
+  const endpoint = (() => {
+    switch (adapter.id) {
+      case 'xai': return `${baseUrl}/v1/responses`
+      case 'anthropic': return 'https://api.anthropic.com/v1/messages'
+      case 'gemini': return 'https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent'
+      default: return `${baseUrl}/v1/chat/completions`
+    }
+  })()
+
+  const requestShape = (() => {
+    switch (adapter.id) {
+      case 'xai':
+        return [
+          'Body: { model, input, max_output_tokens: 4096 }',
+          'input contains optional system message plus user content parts.',
+          'Text uses input_text. Images use input_image with data URLs.',
+          'Documents are uploaded first to /v1/files, then referenced as input_file by file_id.',
+        ]
+      case 'anthropic':
+        return [
+          'Body: { model, messages, max_tokens: 4096, system? }',
+          'messages[0].content is an array of text/image/document blocks.',
+          'Images and documents use base64 source blocks with media_type.',
+          'API headers include anthropic-version: 2023-06-01.',
+        ]
+      case 'gemini':
+        return [
+          'Body: { contents: [{ role: "user", parts }], generationConfig: { maxOutputTokens: 4096 } }',
+          'System prompt is inserted as a text part before the user message.',
+          'Images and documents use inlineData with mimeType and base64 data.',
+        ]
+      default:
+        return [
+          'Body: { model, messages, max_tokens: 4096 } for most models.',
+          'o*, gpt-5*, and reasoning models use max_completion_tokens instead of max_tokens.',
+          'messages include optional system role and a user content array.',
+          'Text uses { type: "text" }. Images use image_url data URLs. Documents use file_data.',
+        ]
+    }
+  })()
+
+  const attachmentRules = [
+    caps.requiresTextOnlyAttachments
+      ? 'Text-only adapter: images, PDFs, DOCX, and other binary attachments are skipped before inference.'
+      : 'Text attachments are embedded into the user text with filename delimiters.',
+    caps.supportsImages && !caps.requiresTextOnlyAttachments
+      ? 'Image attachments are sent to the provider adapter.'
+      : 'Image attachments are skipped for this provider/model capability.',
+    caps.supportsDocuments && !caps.requiresTextOnlyAttachments
+      ? 'Document attachments are sent to the provider adapter.'
+      : 'Document attachments are skipped for this provider/model capability.',
+  ]
+
+  if (adapter.id === 'openrouter') {
+    attachmentRules.push('OpenRouter is treated as document-capable for PDFs through its universal PDF parsing path.')
+    attachmentRules.push('OpenRouter image support is model-dependent; the app sends image_url for image-capable use, and provider rejection is marked skipped rather than retried with placeholders.')
+  }
+  if (adapter.id === 'xai') {
+    attachmentRules.push('xAI always uses the Responses API in this app; PDFs are not sent through chat completions.')
+  }
+  if (deepseekRouted.length > 0) {
+    attachmentRules.push(`DeepSeek-routed model IDs are forced text-only: ${deepseekRouted.slice(0, 4).join(', ')}${deepseekRouted.length > 4 ? ', ...' : ''}.`)
+  }
+
+  return {
+    adapter,
+    endpoint,
+    requestShape,
+    attachmentRules,
+    completionTokenModels,
+    selected,
+  }
+}
+
 export function RunTab() {
   const {
     config, systemPrompt, customPrompts, fileItems,
@@ -90,7 +226,7 @@ export function RunTab() {
     isRunning, setIsRunning, setActiveTab,
     modelScope, setModelScope, toggleAllModels,
     modelPricing, setModelPricing, builtinPricing,
-    debugEntries, pushDebugEntry, clearDebugEntries,
+    debugEntries, pushDebugEntry, removeDebugEntry, clearDebugEntries,
   } = useStore()
   const [expandedProv, setExpandedProv] = useState<Set<string>>(new Set())
   const [progress, setProgress] = useState({ completed: 0, total: 0 })
@@ -102,7 +238,9 @@ export function RunTab() {
   const [outputIndex, setOutputIndex] = useState(0)
   const [filterModel, setFilterModel] = useState<string | null>(null)
   const [filterFile, setFilterFile] = useState<string | null>(null)
+  const [hideFailedOutput, setHideFailedOutput] = useState(false)
   const [requestCollapsed, setRequestCollapsed] = useState(true)
+  const [handlingProvider, setHandlingProvider] = useState<any | null>(null)
 
   const enabledProviders = config.providers.filter((p: any) => p.enabled)
 
@@ -181,7 +319,7 @@ export function RunTab() {
     return resolveEffectivePricing(provider, modelId, modelPricing, builtinPricing)
   }
 
-  async function archiveRun(run: TestRun, status: TestRun['status'], result: NonNullable<TestRun['result']>, localInputTokens?: number) {
+  async function archiveRun(run: TestRun, status: TestRun['status'], result: NonNullable<TestRun['result']>, localInputTokens?: number, payloadMedia: PayloadMediaSummary = EMPTY_PAYLOAD_MEDIA) {
     try {
       const files = run.batchFiles?.length ? run.batchFiles : (run.file ? [run.file] : [])
       const fileHashes = await Promise.all(files.map(async file => ({
@@ -229,6 +367,14 @@ export function RunTab() {
         fileHash: fileHashes.length === 1 ? fileHashes[0].hash : fileHashes.length > 1 ? await sha256Hex(fileHashes.map(file => file.hash).join('|')) : null,
         fileMetadata: run.file?.metadata ?? null,
         batchFiles: run.batchFiles ? fileHashes : null,
+        pdfSent: payloadMedia.pdfSent,
+        pdfFileSize: payloadMedia.pdfFileSize,
+        imageSent: payloadMedia.imageSent,
+        imageFileSize: payloadMedia.imageFileSize,
+        videoSent: payloadMedia.videoSent,
+        videoFileSize: payloadMedia.videoFileSize,
+        audioSent: payloadMedia.audioSent,
+        audioFileSize: payloadMedia.audioFileSize,
         inputTokens: result.inputTokens,
         outputTokens: result.outputTokens,
         totalTokens: result.totalTokens,
@@ -330,6 +476,7 @@ export function RunTab() {
 
   async function executeRun(run: TestRun) {
     updateRun(run.id, { status: 'running', result: undefined, localInputTokens: undefined })
+    let sentMedia = EMPTY_PAYLOAD_MEDIA
 
     const prov = config.providers.find((p: any) => p.id === run.providerId)
     if (!prov) {
@@ -345,6 +492,19 @@ export function RunTab() {
         status: 'skipped',
         result: skippedResult,
       })
+      pushDebugEntry({
+        runId: run.id,
+        provider: prov.name,
+        model: run.model,
+        request: { skipped: true, reason: skipReason },
+        response: skippedResult,
+        error: skipReason,
+        file: run.file?.name || (run.batchFiles ? `batch (${run.batchFiles.length})` : ''),
+        filePath: run.file?.path,
+        inputTokens: 0,
+        outputTokens: 0,
+        latency: 0,
+      })
       await archiveRun(run, 'skipped', skippedResult)
       setProgress((p: any) => ({ ...p, completed: p.completed + 1 }))
       return
@@ -352,6 +512,7 @@ export function RunTab() {
 
     try {
       const input = buildRunInput(run)
+      sentMedia = payloadMediaSummary(filesForRun(run))
 
       let result = await webApi.chatCompletion({
         provider: { type: prov.type, adapterId: prov.adapterId, baseUrl: prov.baseUrl, apiKeyEnv: prov.apiKeyEnv, headers: prov.headers },
@@ -384,12 +545,26 @@ export function RunTab() {
           result: skippedResult,
           localInputTokens: undefined,
         })
-        await archiveRun(run, 'skipped', skippedResult)
+        pushDebugEntry({
+          runId: run.id,
+          provider: prov.name,
+          model: run.model,
+          request: result.requestPayload ?? input,
+          response: skippedResult,
+          error: skippedResult.error,
+          file: run.file?.name || (run.batchFiles ? `batch (${run.batchFiles.length})` : ''),
+          filePath: run.file?.path,
+          inputTokens: 0,
+          outputTokens: 0,
+          latency: 0,
+        })
+        await archiveRun(run, 'skipped', skippedResult, undefined, sentMedia)
         setProgress((p: any) => ({ ...p, completed: p.completed + 1 }))
         return
       }
 
       const debug: DebugEntry = {
+        runId: run.id,
         provider: prov.name,
         model: run.model,
         request: result.requestPayload ?? input,
@@ -419,14 +594,27 @@ export function RunTab() {
         result,
         localInputTokens: localTokens || undefined,
       })
-      await archiveRun(run, status, result, localTokens || undefined)
+      await archiveRun(run, status, result, localTokens || undefined, sentMedia)
     } catch (err: any) {
       const errorResult = { inputTokens: 0, outputTokens: 0, totalTokens: 0, responseText: '', latencyMs: 0, error: err.message ?? String(err) }
       updateRun(run.id, {
         status: 'error',
         result: errorResult,
       })
-      await archiveRun(run, 'error', errorResult)
+      pushDebugEntry({
+        runId: run.id,
+        provider: prov.name,
+        model: run.model,
+        request: { failedBeforeProviderResponse: true },
+        response: errorResult,
+        error: errorResult.error,
+        file: run.file?.name || (run.batchFiles ? `batch (${run.batchFiles.length})` : ''),
+        filePath: run.file?.path,
+        inputTokens: 0,
+        outputTokens: 0,
+        latency: 0,
+      })
+      await archiveRun(run, 'error', errorResult, undefined, sentMedia)
     }
 
     setProgress((p: any) => ({ ...p, completed: p.completed + 1 }))
@@ -438,7 +626,6 @@ export function RunTab() {
     if (pendingRuns.length === 0) return
     setIsRunning(true)
     setProgress({ completed: 0, total: pendingRuns.length })
-    clearDebugEntries()
 
     for (let i = 0; i < pendingRuns.length; i++) {
       const run = pendingRuns[i]
@@ -459,6 +646,7 @@ export function RunTab() {
 
   function removeRun(id: string) {
     setQueue(queue.filter((r: TestRun) => r.id !== id))
+    removeDebugEntry(id)
   }
 
   function clearRuns() {
@@ -483,7 +671,8 @@ export function RunTab() {
 
   const filteredDebugEntries = debugEntries.filter(e =>
     (filterModel ? e.model === filterModel : true) &&
-    (filterFile ? e.file === filterFile : true)
+    (filterFile ? e.file === filterFile : true) &&
+    (hideFailedOutput ? !e.error : true)
   )
   const uniqueModels = [...new Set(debugEntries.map(e => e.model))]
   const uniqueFiles = [...new Set(debugEntries.map(e => e.file).filter(Boolean) as string[])]
@@ -628,6 +817,12 @@ export function RunTab() {
                       </button>
                       <span className="text-xs text-surface-400">{prov.models.length} models</span>
                       <span className="badge-green text-[10px]">{selectedCount} in scope</span>
+                      <button
+                        onClick={e => { e.stopPropagation(); setHandlingProvider(prov) }}
+                        className="rounded-md border border-surface-600 px-2 py-1 text-[10px] font-medium text-surface-300 transition-colors hover:border-brand-gold/50 hover:text-brand-gold"
+                      >
+                        Handling
+                      </button>
 
                       <div className="flex-1" />
 
@@ -908,8 +1103,24 @@ export function RunTab() {
 
                 <div className="flex items-center gap-2">
                   <span className="text-[10px] text-surface-500">
-                    {displayEntry?.error ? 'Error' : 'Success'}
+                    {displayEntry ? (displayEntry.error ? 'Error' : 'Success') : '-'}
                   </span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setHideFailedOutput(value => !value)
+                      setOutputIndex(0)
+                    }}
+                    className={`inline-flex items-center gap-1 rounded-md border px-2 py-1 text-[10px] font-medium transition-colors ${
+                      hideFailedOutput
+                        ? 'border-brand-gold/45 bg-brand-gold/15 text-brand-gold'
+                        : 'border-surface-700 bg-surface-850 text-surface-400 hover:border-surface-600 hover:text-surface-200'
+                    }`}
+                    title="Hide failed output records from the page flipper"
+                  >
+                    {hideFailedOutput ? <ToggleRight size={14} /> : <ToggleLeft size={14} />}
+                    Hide Failed
+                  </button>
                   <button
                     onClick={() => setOutputIndex(Math.max(0, displayIndex - 1))}
                     disabled={displayIndex === 0 || filteredDebugEntries.length === 0}
@@ -1025,6 +1236,88 @@ export function RunTab() {
           )}
         </div>
       )}
+      {handlingProvider && (() => {
+        const selectedModels = getSelectedModels(handlingProvider.id, handlingProvider.models)
+        const handling = providerHandlingDetails(handlingProvider, selectedModels)
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-6" onClick={() => setHandlingProvider(null)}>
+            <div className="max-h-[86vh] w-full max-w-4xl overflow-y-auto rounded-lg border border-surface-700 bg-surface-950 shadow-2xl" onClick={e => e.stopPropagation()}>
+              <div className="sticky top-0 z-10 flex items-start justify-between gap-4 border-b border-surface-700 bg-surface-950 px-5 py-4">
+                <div>
+                  <h3 className="text-lg font-semibold text-surface-100">{handlingProvider.name} Handling</h3>
+                  <p className="mt-1 text-xs text-surface-400">
+                    Adapter <span className="font-mono text-brand-gold">{handling.adapter.id}</span> · Protocol <span className="font-mono text-surface-200">{handling.adapter.protocol}</span> · Canonical pricing key <span className="font-mono text-surface-200">{handling.adapter.canonicalProviderKey}</span>
+                  </p>
+                </div>
+                <button onClick={() => setHandlingProvider(null)} className="rounded-md p-1.5 text-surface-400 hover:bg-surface-800 hover:text-surface-100">
+                  <X size={18} />
+                </button>
+              </div>
+
+              <div className="grid gap-4 p-5 lg:grid-cols-2">
+                <section className="rounded-lg border border-surface-700 bg-surface-900 p-4">
+                  <h4 className="mb-2 text-sm font-semibold text-surface-200">API Route</h4>
+                  <dl className="space-y-2 text-xs">
+                    <div>
+                      <dt className="text-surface-500">Endpoint</dt>
+                      <dd className="font-mono text-surface-200 break-all">{handling.endpoint}</dd>
+                    </div>
+                    <div>
+                      <dt className="text-surface-500">API key env</dt>
+                      <dd className="font-mono text-surface-200">{handlingProvider.apiKeyEnv}</dd>
+                    </div>
+                    <div>
+                      <dt className="text-surface-500">Extra headers</dt>
+                      <dd className="font-mono text-surface-200 whitespace-pre-wrap">{handlingProvider.headers?.trim() || 'None'}</dd>
+                    </div>
+                  </dl>
+                </section>
+
+                <section className="rounded-lg border border-surface-700 bg-surface-900 p-4">
+                  <h4 className="mb-2 text-sm font-semibold text-surface-200">Attachment Rules</h4>
+                  <ul className="space-y-2 text-xs text-surface-300">
+                    {handling.attachmentRules.map(rule => <li key={rule}>- {rule}</li>)}
+                  </ul>
+                </section>
+
+                <section className="rounded-lg border border-surface-700 bg-surface-900 p-4">
+                  <h4 className="mb-2 text-sm font-semibold text-surface-200">Payload Shape</h4>
+                  <ul className="space-y-2 text-xs text-surface-300">
+                    {handling.requestShape.map(rule => <li key={rule}>- {rule}</li>)}
+                  </ul>
+                  <div className="mt-3 rounded-md bg-surface-950 p-3 text-[11px] text-surface-400">
+                    All run requests use normalized browser input first: <span className="font-mono text-surface-200">systemPrompt</span>, <span className="font-mono text-surface-200">userMessage</span>, and <span className="font-mono text-surface-200">attachments[]</span>. The server adapter converts that into this provider's wire format.
+                  </div>
+                </section>
+
+                <section className="rounded-lg border border-surface-700 bg-surface-900 p-4">
+                  <h4 className="mb-2 text-sm font-semibold text-surface-200">Model-Specific Rules</h4>
+                  <div className="space-y-3 text-xs text-surface-300">
+                    <div>
+                      <div className="text-surface-500">Models in scope</div>
+                      <div className="mt-1 font-mono text-surface-200">
+                        {handling.selected.length === 0 ? 'None selected' : `${handling.selected.slice(0, 8).join(', ')}${handling.selected.length > 8 ? ', ...' : ''}`}
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-surface-500">max_completion_tokens models</div>
+                      <div className="mt-1 font-mono text-surface-200">
+                        {handling.completionTokenModels.length === 0 ? 'None detected' : `${handling.completionTokenModels.slice(0, 8).join(', ')}${handling.completionTokenModels.length > 8 ? ', ...' : ''}`}
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-surface-500">Skip behavior</div>
+                      <div className="mt-1 text-surface-300">
+                        Unsupported files are marked skipped before inference. If a provider rejects an attachment payload, the run is marked skipped and is not retried with a placeholder.
+                      </div>
+                    </div>
+                  </div>
+                </section>
+              </div>
+            </div>
+          </div>
+        )
+      })()}
     </div>
   )
 }

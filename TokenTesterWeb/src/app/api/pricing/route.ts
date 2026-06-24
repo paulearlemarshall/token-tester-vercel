@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { getPricing, upsertModelPrice } from '@/lib/pricing'
+import { deleteModelPriceRecord, getPricing, upsertModelPrice } from '@/lib/pricing'
 
 export const dynamic = 'force-dynamic'
 
@@ -15,6 +15,16 @@ export async function PUT(request: Request) {
   try {
     const payload = await request.json()
     const result = await upsertModelPrice(payload)
+    return NextResponse.json(result)
+  } catch (err: any) {
+    return NextResponse.json({ error: err.message ?? String(err) }, { status: 400 })
+  }
+}
+
+export async function DELETE(request: Request) {
+  try {
+    const payload = await request.json()
+    const result = await deleteModelPriceRecord(payload)
     return NextResponse.json(result)
   } catch (err: any) {
     return NextResponse.json({ error: err.message ?? String(err) }, { status: 400 })

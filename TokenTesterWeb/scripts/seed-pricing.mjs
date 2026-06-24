@@ -27,7 +27,7 @@ for (const row of rows) {
 
   const upstreamProvider = inferUpstreamProvider(serviceProvider, modelId)
   const displayName = String(row.name ?? row.displayName ?? row.display_name ?? modelId)
-  const source = sourceName || row.source || 'seed_json'
+  const source = sourceName || row.source || 'imported-json'
   const sourcePriority = source === 'llm-prices' ? 10 : 5
   const matchEvidence = {
     source,
@@ -162,13 +162,13 @@ function parseRows(text, sourceRef) {
       rows: text.split(/\r?\n/).filter(Boolean).map(line => JSON.parse(line)),
       sourceUrl: sourceRef.startsWith('http') ? sourceRef : null,
       sourceUpdatedAt: null,
-      sourceName: 'seed_json',
+      sourceName: 'imported-json',
     }
   }
 
   const parsed = JSON.parse(text)
   if (Array.isArray(parsed)) {
-    return { rows: parsed, sourceUrl: sourceRef.startsWith('http') ? sourceRef : null, sourceUpdatedAt: null, sourceName: 'seed_json' }
+    return { rows: parsed, sourceUrl: sourceRef.startsWith('http') ? sourceRef : null, sourceUpdatedAt: null, sourceName: 'imported-json' }
   }
 
   if (Array.isArray(parsed.prices)) {
@@ -186,7 +186,7 @@ function parseRows(text, sourceRef) {
       rows.push({ provider, model, input: pricing.input, output: pricing.output, per: pricing.per ?? '1M', name: pricing.name })
     }
   }
-  return { rows, sourceUrl: sourceRef.startsWith('http') ? sourceRef : null, sourceUpdatedAt: null, sourceName: 'seed_json' }
+  return { rows, sourceUrl: sourceRef.startsWith('http') ? sourceRef : null, sourceUpdatedAt: null, sourceName: 'imported-json' }
 }
 
 function normalizeServiceProvider(value) {

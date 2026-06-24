@@ -107,6 +107,7 @@ export interface PriceEntry {
 }
 
 export interface DebugEntry {
+  runId?: string
   provider: string
   model: string
   request: any
@@ -147,6 +148,14 @@ export interface ArchivedRunResult {
   fileHash?: string | null
   fileMetadata?: unknown
   batchFiles?: unknown
+  pdfSent: boolean
+  pdfFileSize?: number | null
+  imageSent: boolean
+  imageFileSize?: number | null
+  videoSent: boolean
+  videoFileSize?: number | null
+  audioSent: boolean
+  audioFileSize?: number | null
   inputTokens: number
   outputTokens: number
   totalTokens: number

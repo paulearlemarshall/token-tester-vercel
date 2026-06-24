@@ -1,217 +1,397 @@
 # Token Tester Web
 
-Token Tester Web is a Vercel-deployed Next.js App Router app for comparing model responses, token usage, latency, and estimated cost across multiple AI providers while keeping provider API keys on the server.
+Token Tester Web is a Vercel-deployed Next.js App Router application for testing AI providers side by side. It compares response quality, token usage, latency, file handling, pricing, and estimated cost across model/provider combinations, then stores completed observations in a persistent Neon-backed Results Archive.
 
-## Overview
-
-The app is built for repeated comparison work:
-
-- Configure providers and fetch their available models.
-- Select model subsets per provider.
-- Queue prompt runs and file runs across many model/provider combinations.
-- Collect response text, token counts, latency, and cost estimates.
-- Persist completed run results with prompt/file checksums, provider/model metadata, output text, token counts, latency, and cost.
-- Inspect and override pricing from the app itself.
-- Store pricing records in Neon with source precedence and matching evidence.
-
-Production deployment:
+Production:
 
 ```text
 https://token-tester-web.vercel.app
 ```
 
-## Runtime
+## Core Capabilities
 
-- Framework: Next.js `16.2.9` with React `19.2.4`.
-- Styling: Tailwind CSS `4` through `src/app/globals.css`.
-- State: Zustand store in `src/store.ts`, persisted to browser `localStorage`.
-- Token counting: `gpt-tokenizer` for local estimates.
-- Charts and tables: Recharts and local React components.
+- Configure AI providers while keeping API keys on the server.
+- Discover provider models through server-side API routes.
+- Import provider-discovered pricing when providers expose machine-readable prices.
+- Seed baseline pricing from `simonw/llm-prices`.
+- Override model prices manually from the UI.
+- Queue prompt, file, folder, single-file, and batch-file tests across many providers and models.
+- Preserve completed queue rows when adding more models.
+- Skip unsupported file/provider combinations without retrying fake placeholder content.
+- Run text, image, PDF, DOCX, and batch-file workloads where provider adapters support them.
+- Track local token estimates, provider token usage, latency, output text, errors, and estimated cost.
+- Persist every completed run to Neon with checksums, timestamps, provider metadata, payloads, and pricing context.
+- Slice archived observations by provider, model, status, source, file, prompt, checksum, suppression state, and date.
+- Export archive data to XLS.
+- Inspect provider-specific request handling from the Run Tests tab.
+
+## Runtime Stack
+
+- Framework: Next.js `16.2.9`, App Router.
+- UI: React `19.2.4`.
+- Styling: Tailwind CSS `4`.
+- State: Zustand, persisted to browser `localStorage`.
 - Database: Neon Postgres through `@neondatabase/serverless`.
-- Deployment target: Vercel production project `token-tester-web`.
+- Token estimation: `gpt-tokenizer`.
+- Charts: Recharts.
+- Spreadsheet export: `xlsx`.
+- Deployment: Vercel project `token-tester-web`.
 
-## Code Map
+## App Structure
 
-- `src/app/page.tsx`: renders the client app shell.
-- `src/app/layout.tsx`: global metadata and layout.
-- `src/components/TokenTesterApp.tsx`: top-level tabbed interface.
-- `src/components/ConfigureTab.tsx`: provider setup, model discovery, fetched pricing import, and the Pricing navigator entry point.
-- `src/components/PromptsTab.tsx`: prompt and file input management.
-- `src/components/RunTab.tsx`: model selection, queue creation, unsupported attachment skips, retry actions, and per-model price edits. It builds normalized run inputs rather than provider wire payloads.
-- `src/components/ResultsTab.tsx`: run results, summaries, charts, and exports.
-- `src/components/ResultsArchiveTab.tsx`: persisted results archive with smart filtering, sortable rows, and charts.
-- `src/components/PricingNavigator.tsx`: provider/model price browser with source records, evidence, and sorting.
-- `src/components/layout/Sidebar.tsx`: primary navigation.
-- `src/lib/provider-api.ts`: server-side provider model discovery and provider wire adapters.
-- `src/lib/pricing.ts`: Neon pricing read/write logic.
-- `src/lib/run-results.ts`: Neon run-result archive schema, reads, and upserts.
-- `src/lib/provider-registry.ts`: adapter IDs, provider inference, canonical provider identity, and attachment capabilities.
-- `src/lib/run-input.ts`: normalized prompt/file input builder and unsupported attachment checks.
-- `src/lib/pricing-match.ts`: canonical provider keys, pricing lookup keys, and effective price fallback logic.
-- `src/lib/provider-key.ts`: compatibility re-export for pricing key helpers.
-- `src/lib/provider-capabilities.ts`: compatibility re-export for attachment capability helpers.
-- `src/lib/db.ts`: Neon SQL client.
-- `src/lib/web-api.ts`: browser-side wrappers for app API routes.
-- `src/lib/browser-files.ts`: browser file parsing helpers.
-- `src/utils/constants.ts`: provider presets and labels.
-- `src/utils/formatters.ts`: display formatting helpers.
-- `src/types.ts`: shared app and API types.
-- `scripts/setup-pricing-db.mjs`: creates the Neon pricing and run-result archive tables and indexes.
-- `scripts/seed-pricing.mjs`: imports pricing JSON, NDJSON, or `llm-prices` into Neon.
+```text
+src/app/page.tsx                         App shell entry
+src/app/layout.tsx                       Global metadata/layout
+src/components/TokenTesterApp.tsx        Main tabbed interface
+src/components/ConfigureTab.tsx          Provider setup, model fetch, pricing entry point
+src/components/PromptsTab.tsx            Prompt and file input management
+src/components/RunTab.tsx                Queue generation, execution, retries, provider handling inspector
+src/components/ResultsTab.tsx            Current in-memory run results, charts, exports
+src/components/ResultsArchiveTab.tsx     Persisted archive filters, tables, charts, XLS export
+src/components/PricingNavigator.tsx      Pricing records, effective prices, evidence
+src/components/layout/Sidebar.tsx        Left navigation
+src/lib/provider-api.ts                  Server-side provider discovery and request adapters
+src/lib/provider-registry.ts             Provider adapter IDs, canonical keys, attachment capabilities
+src/lib/run-input.ts                     Normalized prompt/file input building
+src/lib/browser-files.ts                 Browser-side file parsing
+src/lib/pricing.ts                       Neon pricing reads/writes
+src/lib/pricing-match.ts                 Canonical pricing lookup and fallback matching
+src/lib/run-results.ts                   Neon Results Archive schema and persistence
+src/lib/web-api.ts                       Browser wrappers for app API routes
+src/types.ts                             Shared TypeScript types
+scripts/setup-pricing-db.mjs             Database setup and schema repair
+scripts/seed-pricing.mjs                 Pricing importer
+```
 
-## Request Flow
+## Main Workflow
 
-The browser never talks directly to provider APIs for model discovery or chat completion.
+1. Configure provider connections.
+2. Fetch models from providers.
+3. Review or adjust pricing in the Pricing navigator.
+4. Create or select prompts and upload test files.
+5. Select models on the Run Tests tab.
+6. Generate the queue.
+7. Run all queued work or retry individual failed rows.
+8. Review current run output in Results.
+9. Review persisted history in Results Archive.
 
-1. The user configures a provider in the UI.
-2. The browser calls a Next.js route handler.
-3. The route handler reads the real API key from Vercel or local `.env.local`.
-4. The server adapter talks to the provider API.
-5. The browser receives normalized models, pricing, or chat results.
+## Navigation Tabs
 
-This keeps provider secrets on the server and keeps the browser focused on UI, state, and local preview logic.
+### Configure
 
-## Providers
-
-Built-in presets are defined in `src/utils/constants.ts`.
-
-- OpenAI: `OPENAI_API_KEY`, OpenAI-compatible.
-- OpenRouter: `OPENROUTER_API_KEY`, OpenAI-compatible.
-- SS&C AI Gateway: `SSC_CLOUD_API_KEY`, OpenAI-compatible with optional `OpenAI-Project` header.
-- Anthropic: `ANTHROPIC_API_KEY`, Anthropic Messages API.
-- Google Gemini: `GEMINI_API_KEY`, Google Generative Language API.
-- DeepSeek: `DEEPSEEK_API_KEY`, OpenAI-compatible.
-- Mistral: `MISTRAL_API_KEY`, OpenAI-compatible.
-- xAI: `XAI_API_KEY`, OpenAI-compatible at `https://api.x.ai`.
-
-Each provider has an `adapterId` in addition to its broad protocol type. The protocol type says which family the provider broadly resembles; the adapter ID drives concrete behavior:
-
-- `openai`
-- `openrouter`
-- `xai`
-- `anthropic`
-- `gemini`
-- `deepseek`
-- `mistral`
-- `ssnc-ai-gateway`
-- `custom-openai-compatible`
-
-Saved browser configs are migrated in `src/store.ts` so older providers receive an inferred adapter ID. Saved configs that still reference the old Groq preset are migrated to xAI with `XAI_API_KEY`.
-
-## Run Request Architecture
-
-The browser builds a normalized run input and sends it to `POST /api/chat`. Provider wire formats are built server-side only.
-
-Normalized run input contains:
-
-- `systemPrompt`
-- `userMessage`
-- `attachments`
-
-Each attachment contains:
-
-- `kind`: `text`, `image`, or `document`
-- `filename`
-- `mimeType`
-- `base64` for binary uploads
-- `text` for text uploads
-
-The server-side adapter then serializes that neutral input:
-
-- OpenAI, OpenRouter, DeepSeek, Mistral, SS&C, and custom OpenAI-compatible providers use `/v1/chat/completions`.
-- xAI uses `/v1/responses`; document attachments are uploaded to `/v1/files` first and referenced as `input_file`.
-- Anthropic uses `/v1/messages`.
-- Gemini uses `generateContent`.
-
-Debug output records the provider wire request returned by the server adapter when available, so the Run tab can inspect the actual payload sent to the provider.
-
-## Queue and Result Persistence
-
-The Run tab treats the queue as accumulated work:
-
-- `Generate Queue` adds missing provider/model/test-case combinations without deleting existing runs.
-- Existing success, error, skipped, and queued rows are preserved when more models are selected and the queue is generated again.
-- `Run All` executes only rows still marked `queued`; completed work is not reset or re-run.
-- Individual rows can still be retried.
-- `Clear` is the explicit reset action and removes queue state, debug output, and progress.
-
-When a run reaches a terminal state (`success`, `error`, or `skipped`), the browser computes SHA-256 checksums and posts the archived record to `POST /api/results`.
-
-Checksums are stored for:
-
-- The system prompt.
-- The user/custom prompt text.
-- The combined input identity.
-- Single files, using available base64 or text content.
-- Batch file groups, using a deterministic combined hash of each file hash.
-
-The archived record also stores:
-
-- Provider ID, provider name, canonical service provider, and model.
-- Source type and source label.
-- Prompt text and prompt hashes.
-- File name, path, size, type, MIME type, metadata, and file hash.
-- Batch file metadata and hashes.
-- Input, output, total, and local token counts.
-- Latency, pricing used, and estimated cost.
-- Response text, error text, provider request payload, and response payload.
-- Run start, completion, archive creation, and update timestamps.
-
-Archive rows are append-only observations. Each completed attempt gets a fresh `run_id`, while `record_key` groups equivalent observations by canonical provider, model, and input checksum. The Results Archive defaults to reporting the newest observation per `record_key`; switch to `All observations` to inspect historical repeats of the same file/prompt/model combination.
-
-`GET /api/results` returns recent archived observations for the Results Archive tab. The route lazily creates the archive table if it is missing, so a deployed app can begin archiving before `npm run db:setup` has been run manually. `PATCH /api/results` bulk suppresses or restores archive records, and `DELETE /api/results` permanently deletes selected archive records.
-
-## Results Archive
-
-The Results Archive tab is the persistent reporting surface for historical runs.
+The Configure tab manages provider definitions and model discovery.
 
 It supports:
 
-- Free-text smart filtering across provider, model, source, file name/path, hashes, output text, and errors.
-- Facet filters for provider, model, status, source type, and recorded file name.
-- Active/all/suppressed visibility filters.
-- Latest-per-checksum reporting mode plus all-observations history mode.
-- Sortable result rows for completion time, archive creation time, provider, model, status, source, file, token counts, latency, and estimated cost.
-- Multi-select row actions for suppress, restore, and confirmed permanent delete.
-- Suppression keeps the record but excludes it from summary metrics and charts.
-- Grouped table views by file name or by the first few words of the prompt.
-- Summary metrics for run count, success/error/skipped count, tokens, cost, and average latency.
-- Charts for cost by model, average latency by model, tokens by provider, and runs by status.
+- Built-in provider presets.
+- Custom OpenAI-compatible providers.
+- Server-side model fetching through `POST /api/models`.
+- Provider API keys stored in Vercel/local environment variables, not browser state.
+- Importing provider-discovered prices into Neon.
+- Opening the Pricing navigator.
 
-## Model Discovery
+Provider definitions include:
 
-`POST /api/models` returns provider-specific model lists and metadata.
+- Display name.
+- Provider type.
+- Adapter ID.
+- Base URL.
+- API key environment variable name.
+- Optional project/header metadata.
 
-- OpenAI-compatible providers call `{baseUrl}/v1/models`.
-- Gemini uses the Google Generative Language models endpoint.
-- Anthropic uses its messages API model listing.
+### Prompts And Files
 
-When the provider returns machine-readable pricing, the UI persists that pricing immediately:
+The Prompts tab manages test inputs.
 
-- OpenRouter-style `pricing.prompt` and `pricing.completion` are normalized to USD per 1M tokens.
-- xAI `prompt_text_token_price` and `completion_text_token_price` are normalized from cents per 100M tokens to USD per 1M tokens.
-- The raw provider payload is stored alongside the price record so the navigator can explain what matched.
+It supports:
 
-## File and Document Handling
+- System prompt text.
+- User/custom prompt text.
+- File uploads.
+- Folder-style batches where browser file metadata is available.
+- Text extraction for supported text-like files.
+- Base64 capture for binary files.
+- Image, PDF, DOCX, text, and mixed batch inputs.
 
-Uploads are parsed in `src/lib/browser-files.ts`, normalized in `src/lib/run-input.ts`, and serialized by provider adapters in `src/lib/provider-api.ts`.
+The browser computes deterministic input identity before archiving so repeat observations can be grouped later.
 
-- Text files become `text` attachments.
-- Images become `image` attachments when the provider adapter says the provider supports them.
-- PDFs and DOCX files become `document` attachments and are only sent to providers that the app explicitly treats as document-capable.
-- OpenRouter is treated as document-capable because it exposes a universal PDF handler and can parse PDFs even when the downstream model does not natively accept file input.
-- xAI / Grok requests are routed through xAI `/v1/responses` for both text and document runs, because the legacy chat-completions path is text/image only.
-- Unsupported attachments are marked `skipped` before inference. Skipped runs record zero input tokens, zero output tokens, zero latency, and zero cost.
-- If a provider rejects a file, image, or document payload, the run is marked `skipped`; the app must not retry with a placeholder such as `[.PDF file]`.
-- DeepSeek providers and DeepSeek-routed models are treated as text-only and skip PDFs, DOCX files, and images.
-- Generic OpenAI-compatible providers are conservative by default. OpenAI's own API is treated as document-capable; other OpenAI-compatible gateways are only allowed once their file-input schema is verified.
-- Queue rows with `error` status can be retried individually. Queue rows with `skipped` status are informational and are not retried, because the input is known to be unsupported.
+### Run Tests
 
-## Pricing
+The Run Tests tab selects models, generates work, runs jobs, and exposes provider-specific behavior.
 
-The deployed app uses Neon as the pricing source of truth. Static model-pricing bundles are not used at runtime.
+It supports:
 
-Neon keeps a legacy/effective table plus a source-record table:
+- Provider/model search and selection.
+- Per-model price editing.
+- Queue generation across selected providers, models, prompts, and files.
+- Incremental queue generation.
+- Run-all for queued work only.
+- Individual retry for error rows.
+- Clear queue reset.
+- Skipped rows for unsupported attachments.
+- Debug payload inspection.
+- Provider/model Handling inspector.
+
+Queue semantics:
+
+- `Generate Queue` adds missing jobs only.
+- Existing `success`, `error`, `skipped`, and `queued` rows are preserved.
+- Adding more models and generating the queue appends only the new missing jobs.
+- `Run All` executes rows still marked `queued`.
+- Completed work is not re-run unless retried explicitly.
+- `Clear` starts again from an empty queue.
+
+### Results
+
+The Results tab shows the current browser session results from the active queue.
+
+It supports:
+
+- Current run table.
+- Success/error/skipped summary.
+- Token and cost summaries.
+- Latency comparison.
+- Response text inspection.
+- Export of current in-memory results.
+
+The Results tab is for the active working set. The Results Archive is the persisted historical database.
+
+### Results Archive
+
+The Results Archive tab is the persistent analysis surface for completed observations stored in Neon.
+
+It supports:
+
+- Latest-per-checksum mode.
+- All-observations history mode.
+- Records table view.
+- Group by file.
+- Group by prompt.
+- Provider filter.
+- Model filter.
+- Status filter.
+- Source type filter.
+- File filter.
+- Suppression visibility filter.
+- Free-text search across provider, model, source, file name, path, hashes, response text, and errors.
+- Reset filters.
+- Sortable data columns.
+- Drag-reorderable data columns.
+- Suppressed column with sorting.
+- Multi-select.
+- Suppress selected.
+- Restore selected.
+- Confirmed permanent delete.
+- XLS export.
+- Charts and summary metrics.
+
+Suppression behavior:
+
+- Suppressed rows remain visible when visibility is `All` or `Suppressed`.
+- Suppressed rows are greyed out.
+- Suppressed rows do not count in stats, charts, grouped summaries, or aggregate metrics.
+- Suppression is reversible.
+- Delete is permanent and requires confirmation.
+
+Archive XLS export includes the filtered/sorted rows and preserves the stored data fields, including IDs, hashes, prompt text, file metadata, media payload flags and sizes, token counts, latency, pricing, output text, errors, request payload, response payload, timestamps, and suppression state.
+
+## Provider Support
+
+Built-in providers:
+
+| Provider | Adapter ID | API key env | Notes |
+| --- | --- | --- | --- |
+| OpenAI | `openai` | `OPENAI_API_KEY` | OpenAI-compatible chat completions with OpenAI-specific file capability rules. |
+| OpenRouter | `openrouter` | `OPENROUTER_API_KEY` | OpenAI-compatible API plus OpenRouter model metadata and universal PDF handling. |
+| SS&C AI Gateway | `ssnc-ai-gateway` | `SSC_CLOUD_API_KEY` | OpenAI-compatible gateway with optional project header. |
+| Anthropic | `anthropic` | `ANTHROPIC_API_KEY` | Uses Anthropic Messages API. |
+| Google Gemini | `gemini` | `GEMINI_API_KEY` | Uses Google Generative Language `generateContent`. |
+| DeepSeek | `deepseek` | `DEEPSEEK_API_KEY` | Treated as text-only. |
+| Mistral | `mistral` | `MISTRAL_API_KEY` | OpenAI-compatible chat completions. |
+| xAI | `xai` | `XAI_API_KEY` | Uses xAI Responses API for runs, including document input. |
+| Custom OpenAI-compatible | `custom-openai-compatible` | user-defined | Conservative capabilities until verified. |
+
+Provider behavior is controlled by adapter ID, not only the broad protocol family. This matters because OpenAI-compatible providers can differ materially in file support, pricing metadata, headers, payload fields, and model-specific restrictions.
+
+## Provider Handling Inspector
+
+Each provider on the Run Tests tab has a `Handling` button. It opens a provider/model navigator that explains what the app will do under the hood.
+
+The inspector shows:
+
+- Provider adapter.
+- Broad protocol type.
+- Canonical pricing key.
+- Base URL.
+- API key environment variable.
+- Request endpoint.
+- Request payload shape.
+- Extra headers.
+- Attachment handling rules.
+- Image support.
+- Document support.
+- Text-file behavior.
+- Model-specific restrictions.
+- Skip behavior.
+- Selected models for that provider.
+
+Examples:
+
+- xAI runs use `/v1/responses`, upload PDFs/documents to `/v1/files`, and reference them as `input_file`.
+- Anthropic runs use `/v1/messages`, `anthropic-version`, `system`, and `messages`.
+- Gemini runs use `generateContent`, `contents`, and `generationConfig.maxOutputTokens`.
+- OpenAI-compatible runs use `/v1/chat/completions`, `messages`, and either `max_tokens` or `max_completion_tokens` for reasoning-style models.
+- OpenRouter is treated as PDF-capable through its universal PDF path, while image support is model-dependent.
+- DeepSeek-routed models are treated as text-only.
+
+## File And Attachment Handling
+
+Uploads are parsed in the browser, normalized into neutral run input, then serialized by the server adapter.
+
+Attachment kinds:
+
+- `text`: embedded into the prompt with filename delimiters or provider text blocks.
+- `image`: sent as provider-supported image content.
+- `document`: sent only when the provider adapter supports documents.
+
+Provider behavior:
+
+- OpenRouter PDFs use OpenRouter's universal PDF handling path.
+- xAI PDFs use the Responses API, with file upload and `input_file` references.
+- xAI images use `input_image`.
+- Anthropic images/documents use base64 source blocks.
+- Gemini binary files use `inlineData`.
+- DeepSeek and DeepSeek-routed models skip non-text attachments.
+- Generic OpenAI-compatible providers are conservative unless the app has explicit rules.
+
+Unsupported attachments:
+
+- Are marked `skipped`.
+- Are archived as skipped observations.
+- Use zero tokens, zero latency, and zero estimated cost.
+- Are not retried with placeholder text.
+
+Provider rejections:
+
+- File/image/document rejection is treated as skipped when it indicates unsupported content.
+- Other provider failures are recorded as errors and can be retried.
+
+## Pricing System
+
+Pricing is stored in Neon. Runtime pricing does not depend on a static bundled JSON file.
+
+Sources:
+
+- Provider discovery: priority `100`.
+- Manual UI override: priority `50`.
+- `llm-prices` seed: priority `10`.
+
+Rates are stored as USD per 1 million tokens.
+
+Effective pricing selects the highest-priority record for the canonical provider/model pair.
+
+Canonical pricing behavior:
+
+- Gemini pricing is stored under `google`.
+- Gemini card names such as `gemini-2.5-flash` resolve against `google/gemini-2.5-flash`.
+- OpenRouter models preserve routed model IDs.
+- Provider discovery stores raw provider payloads and match evidence.
+- Manual edits remain visible as manual source records.
+
+Provider-discovered conversions:
+
+- OpenRouter `pricing.prompt` and `pricing.completion` values are converted from per-token USD to USD per 1M tokens.
+- xAI `prompt_text_token_price` and `completion_text_token_price` values are converted from cents per 100M tokens to USD per 1M tokens.
+
+## Pricing Navigator
+
+The Pricing navigator is opened from Configure.
+
+It supports:
+
+- Provider/model browsing.
+- Effective input and output price columns.
+- Source record counts.
+- Winning source display.
+- Sorting in both directions.
+- Per-source price deletion with confirmation.
+- Expanded raw source records.
+- Match confidence.
+- Match method.
+- Match evidence.
+- Raw source payload.
+- Raw provider payload.
+- Last-seen and updated timestamps.
+
+This lets the user verify why a price is being applied to a model card.
+
+Deleting a price removes that source record from Neon and recomputes the effective price for the same provider/model. If another source record exists, the model falls back to the next highest-priority source. If no source records remain, the effective price is removed until provider discovery, `llm-prices` import, imported JSON, or a manual override recreates it.
+
+## Results Archive Data Model
+
+Every completed observation is archived. Runs are append-only observations, while `record_key` groups equivalent work.
+
+Identity fields:
+
+- `run_id`: unique per completed observation.
+- `record_key`: canonical provider, model, and input checksum.
+- `input_hash`: checksum for the effective input.
+- `system_prompt_hash`: checksum of system prompt text.
+- `user_message_hash`: checksum of custom/user prompt text.
+- `file_hash`: checksum of a single file where available.
+- `batch_files`: JSON metadata and hashes for batch inputs.
+- `pdf_sent`, `image_sent`, `video_sent`, `audio_sent`: whether that media category was actually included in the provider payload.
+- `pdf_file_size`, `image_file_size`, `video_file_size`, `audio_file_size`: aggregate sent file size in bytes for that media category.
+
+Stored execution fields:
+
+- Provider ID.
+- Provider display name.
+- Canonical service provider.
+- Model.
+- Source type.
+- Source label.
+- Status.
+- PDF, image, video, and audio payload flags.
+- PDF, image, video, and audio payload file sizes.
+- Input tokens.
+- Output tokens.
+- Total tokens.
+- Local input token estimate.
+- Latency.
+- Input price.
+- Output price.
+- Estimated cost.
+- Response text.
+- Error text.
+- Request payload.
+- Response payload.
+- Run started timestamp.
+- Completed timestamp.
+- Archive created timestamp.
+- Archive updated timestamp.
+- Suppressed flag.
+
+Reporting mode:
+
+- `Latest per checksum` reports only the newest observation for each `record_key`.
+- `All observations` reports every archived run.
+
+This makes it possible to see cost and token changes over time while still having a singular current record for each provider/model/input combination.
+
+## Database Schema
+
+`npm run db:setup` creates or repairs the tables and indexes.
+
+Main tables:
+
+```sql
+model_prices
+model_price_records
+run_results
+```
+
+`model_prices` stores the effective legacy/current view:
 
 ```sql
 model_prices (
@@ -228,7 +408,11 @@ model_prices (
   updated_at timestamptz not null default now(),
   primary key (service_provider, model_id)
 )
+```
 
+`model_price_records` stores source-specific records:
+
+```sql
 model_price_records (
   service_provider text not null,
   model_id text not null,
@@ -244,7 +428,7 @@ model_price_records (
 )
 ```
 
-Run archives are stored in:
+`run_results` stores archived observations:
 
 ```sql
 run_results (
@@ -270,6 +454,14 @@ run_results (
   file_hash text,
   file_metadata jsonb,
   batch_files jsonb,
+  pdf_sent boolean not null default false,
+  pdf_file_size bigint,
+  image_sent boolean not null default false,
+  image_file_size bigint,
+  video_sent boolean not null default false,
+  video_file_size bigint,
+  audio_sent boolean not null default false,
+  audio_file_size bigint,
   input_tokens integer,
   output_tokens integer,
   total_tokens integer,
@@ -290,58 +482,68 @@ run_results (
 )
 ```
 
-Prices are stored as USD per 1 million tokens.
+Important indexes cover:
 
-- `GET /api/pricing` returns the effective flattened map by selecting the highest-priority source record per provider/model.
-- `GET /api/pricing/records` returns all seed/live/manual records for the Pricing navigator.
-- `PUT /api/pricing` upserts one model price into Neon.
-- `GET /api/results` returns archived run records.
-- `POST /api/results` upserts a completed run archive row.
-- `PATCH /api/results` sets `suppressed` for selected archive rows.
-- `DELETE /api/results` permanently removes selected archive rows.
+- Completed time.
+- Created time.
+- Provider/model.
+- Status.
+- Input hash.
+- File hash.
+- Suppression state.
+- Record key.
 
-Source priority is:
+## API Routes
 
-- Provider discovery: `100`.
-- Manual edits: `50`.
-- `llm-prices` seed rows: `10`.
+### `POST /api/models`
 
-Model discovery can also populate pricing when the provider returns machine-readable prices:
+Fetches provider models using server-side API keys.
 
-- OpenRouter-style `pricing.prompt` and `pricing.completion` are converted from per-token USD to USD per 1M tokens.
-- xAI `prompt_text_token_price` and `completion_text_token_price` are converted from USD cents per 100M tokens to USD per 1M tokens by dividing by `10000`.
-- Provider discovery stores the raw provider model payload and matching evidence so the navigator can explain why a price applies.
-- The Configure tab `Pricing` button opens the provider/model navigator for effective prices, source precedence, raw context, and match evidence.
-- Gemini pricing is canonicalized under `google/*`, so direct Gemini model cards like `gemini-2.5-flash` resolve against `google/gemini-2.5-flash`.
-- Provider-discovery rows override seeded `llm-prices` rows when both exist for the same canonical provider/model.
+Returns normalized model metadata and any parsed pricing data available from provider discovery.
 
-## Pricing Navigator
+### `POST /api/chat`
 
-The Pricing navigator shows effective pricing plus the full record history for each provider/model pair.
+Runs a normalized prompt/file input through a provider adapter.
 
-It is sortable by:
+The route:
 
-- Provider
-- Model
-- Input
-- Output
-- Winner
-- Record count
-- Updated time
+- Reads the provider API key from the environment.
+- Builds the provider-specific request payload.
+- Calls the provider.
+- Normalizes text, token usage, latency, request payload, and response payload.
+- Returns enough debug context for the Run tab.
 
-Sorting works in both directions and the expanded row shows:
+### `GET /api/pricing`
 
-- Source, priority, and match status
-- Input and output rates
-- Upstream provider
-- Last seen time
-- Match evidence
-- Seed payload
-- Provider payload
+Returns the effective model price map.
+
+### `GET /api/pricing/records`
+
+Returns all price records, including seed, provider-discovered, and manual records.
+
+### `PUT /api/pricing`
+
+Upserts a manual or provider-derived model price.
+
+### `GET /api/results`
+
+Returns recent archive rows.
+
+### `POST /api/results`
+
+Archives a completed run observation.
+
+### `PATCH /api/results`
+
+Suppresses or restores selected archive records.
+
+### `DELETE /api/results`
+
+Permanently deletes selected archive records.
 
 ## Environment Variables
 
-Required for pricing:
+Required database variable:
 
 ```env
 DATABASE_URL=
@@ -360,7 +562,14 @@ MISTRAL_API_KEY=
 XAI_API_KEY=
 ```
 
-On Vercel, `DATABASE_URL` and related Neon variables are provisioned for Production, Preview, and Development. `XAI_API_KEY` is currently configured for Production; add it to Preview and Development if those environments need xAI calls.
+Local setup:
+
+```powershell
+vercel link
+vercel env pull .env.local
+```
+
+Vercel environments should have the same provider keys when Production, Preview, and Development need the same provider behavior.
 
 ## Local Development
 
@@ -373,90 +582,91 @@ npm run db:setup
 npm run dev
 ```
 
-Open `http://localhost:3000`.
+Open:
 
-## Database Setup And Imports
+```text
+http://localhost:3000
+```
 
-Create or repair the schema:
+## Pricing Imports
+
+Create or repair tables:
 
 ```powershell
 npm run db:setup
 ```
 
-Import a JSON or NDJSON pricing file:
+Import a local JSON or NDJSON file:
 
 ```powershell
-npm run db:import-pricing -- path\to\model-prices.json
+npm run db:import-pricing -- path\to\prices.json
 ```
 
-Seed current direct-vendor prices from `simonw/llm-prices`:
+Seed from `simonw/llm-prices`:
 
 ```powershell
 npm run db:import-pricing -- llm-prices
 ```
 
-Supported JSON shapes:
+Supported pricing shapes include:
 
-- Array rows: `{ "provider": "openrouter", "model": "openai/gpt-4o", "input": 2.5, "output": 10 }`.
-- Nested map: `{ "openrouter": { "openai/gpt-4o": { "input": 2.5, "output": 10, "per": "1M" } } }`.
-- `llm-prices` current API shape: `{ "updated_at": "2026-06-09", "prices": [{ "vendor": "openai", "id": "gpt-4o", "name": "GPT-4o", "input": 2.5, "output": 10, "input_cached": 1.25 }] }`.
-
-Current matching rules:
-
-- Pricing lookup always prefers a canonical provider key first, then a legacy provider-name alias if present.
-- Gemini provider names and the Gemini provider type map to `google` for pricing and navigator records.
-- `src/lib/pricing-match.ts` is the shared place for canonical keys, lookup key generation, and effective price fallback logic.
-
-## Verification
-
-Before deploying:
-
-```powershell
-npm run lint
-npm run build
+```json
+[
+  {
+    "provider": "openrouter",
+    "model": "openai/gpt-4o",
+    "input": 2.5,
+    "output": 10
+  }
+]
 ```
 
-Known current lint state: the project builds successfully, and lint reports existing warnings in UI components for `next/image`, unused locals, and hook dependency warnings.
-
-Useful production smoke tests:
-
-```powershell
-node -e "fetch('https://token-tester-web.vercel.app/api/pricing').then(r=>console.log(r.status))"
+```json
+{
+  "openrouter": {
+    "openai/gpt-4o": {
+      "input": 2.5,
+      "output": 10,
+      "per": "1M"
+    }
+  }
+}
 ```
 
-```powershell
-@'
-(async () => {
-  const res = await fetch('https://token-tester-web.vercel.app/api/models', {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ type: 'openai-compat', baseUrl: 'https://api.x.ai', apiKeyEnv: 'XAI_API_KEY' })
-  })
-  console.log(res.status, await res.text())
-})()
-'@ | node
+```json
+{
+  "updated_at": "2026-06-09",
+  "prices": [
+    {
+      "vendor": "openai",
+      "id": "gpt-4o",
+      "name": "GPT-4o",
+      "input": 2.5,
+      "output": 10
+    }
+  ]
+}
 ```
 
 ## Vercel Deployment
 
-The Vercel project must use `TokenTesterWeb` as its Root Directory. Git-triggered builds fail from the repo root because the Next.js `src/app` directory lives under `TokenTesterWeb`.
+The Vercel project must use:
 
-In the Vercel dashboard, configure:
+```text
+Root Directory: TokenTesterWeb
+Framework Preset: Next.js
+Build Command: npm run build
+Output Directory: default
+```
 
-- Project: `token-tester-web`
-- Root Directory: `TokenTesterWeb`
-- Framework Preset: Next.js
-- Build Command: default or `npm run build`
-- Output Directory: default
-
-Production deploy:
+Deploy from local:
 
 ```powershell
 cd TokenTesterWeb
 vercel deploy --prod --yes
 ```
 
-Inspect production:
+Inspect deployment:
 
 ```powershell
 vercel inspect token-tester-web.vercel.app
@@ -464,15 +674,86 @@ vercel logs https://token-tester-web.vercel.app --level error --since 30m
 vercel env ls
 ```
 
-The production alias is:
+Production alias:
 
 ```text
 https://token-tester-web.vercel.app
 ```
 
-## Git Workflow
+## Verification
 
-Run checks, commit the scoped change, push `main`, then deploy production:
+Run before committing or deploying:
+
+```powershell
+npm run lint
+npm run build
+```
+
+Useful API smoke test:
+
+```powershell
+node -e "fetch('https://token-tester-web.vercel.app/api/pricing').then(r=>console.log(r.status))"
+```
+
+Useful xAI model route test:
+
+```powershell
+@'
+(async () => {
+  const res = await fetch('https://token-tester-web.vercel.app/api/models', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      type: 'openai-compat',
+      baseUrl: 'https://api.x.ai',
+      apiKeyEnv: 'XAI_API_KEY'
+    })
+  })
+  console.log(res.status, await res.text())
+})()
+'@ | node
+```
+
+## Operational Notes
+
+- Vercel Git builds must run from `TokenTesterWeb`.
+- The app is intended to be Vercel-only.
+- Provider API keys should be set in Vercel environment variables and pulled locally through `vercel env pull`.
+- Browser state stores provider configuration and selected models, but not secret provider keys.
+- The Results Archive is the source of truth for historical runs.
+- The current Results tab is session-oriented and queue-oriented.
+- Suppressed archive records are not deleted.
+- Deleted archive records cannot be restored through the UI.
+- Provider-specific behavior belongs in adapter/capability modules, not scattered across UI components.
+- Pricing key normalization belongs in `src/lib/pricing-match.ts`.
+
+## Troubleshooting
+
+If Gemini prices appear in the Pricing navigator but not on Gemini model cards, check canonical price lookup for `google/<model>` and direct Gemini model IDs such as `gemini-2.5-flash`.
+
+If OpenRouter reports a model does not support image input, treat it as model-dependent. OpenRouter is a gateway; file/image support depends on the routed model and OpenRouter's own translation layer.
+
+If OpenRouter PDFs appear unsupported, check that the provider adapter is `openrouter`, not a generic OpenAI-compatible adapter.
+
+If xAI PDFs fail with a chat-completions content error, check that the deployed build is using the xAI Responses API path and that the Vercel project is building from the current `TokenTesterWeb` root.
+
+If archive rows are missing, check:
+
+- `DATABASE_URL` is set.
+- `POST /api/results` is succeeding.
+- Runs reached `success`, `error`, or `skipped`.
+- Archive filters are not excluding the records.
+- Visibility is not set to a mode that hides the desired rows.
+
+If suppressed rows disappear, reset filters and set archive visibility to `All` or `Suppressed`.
+
+If provider discovery works locally but not on Vercel, check:
+
+- The relevant API key is set in the correct Vercel environment.
+- The latest deployment was built after the key was added.
+- The Vercel Root Directory is `TokenTesterWeb`.
+
+## Git Workflow
 
 ```powershell
 git status --short

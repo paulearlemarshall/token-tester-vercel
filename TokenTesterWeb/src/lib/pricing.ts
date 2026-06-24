@@ -45,6 +45,13 @@ export interface PriceRecord {
   lastSeenAt: string
 }
 
+export interface DeletePriceRecordInput {
+  id?: number
+  serviceProvider?: string
+  modelId?: string
+  source?: string
+}
+
 export async function getPricing() {
   const sql = getSql()
   const rows = await sql`
@@ -302,6 +309,54 @@ export async function upsertModelPrice(input: ModelPriceInput) {
   }
 }
 
+export async function deleteModelPriceRecord(input: DeletePriceRecordInput) {
+  const sql = getSql()
+  let deleted: { service_provider: string; model_id: string }[] = []
+
+  if (Number.isFinite(input.id)) {
+    deleted = await sql`
+      delete from model_price_records
+      where id = ${input.id}
+      returning service_provider, model_id
+    ` as any[]
+  } else {
+    const serviceProvider = normalizeServiceProvider(input.serviceProvider ?? '')
+    const modelId = (input.modelId ?? '').trim()
+    const source = (input.source ?? '').trim()
+    if (!serviceProvider || !modelId) {
+      throw new Error('id or serviceProvider/modelId is required')
+    }
+
+    if (source) {
+      deleted = await sql`
+        delete from model_price_records
+        where service_provider = ${serviceProvider}
+          and model_id = ${modelId}
+          and source = ${source}
+        returning service_provider, model_id
+      ` as any[]
+    }
+
+    if (deleted.length === 0) {
+      deleted = await sql`
+        delete from model_prices
+        where service_provider = ${serviceProvider}
+          and model_id = ${modelId}
+        returning service_provider, model_id
+      ` as any[]
+    }
+  }
+
+  for (const row of deleted) {
+    await syncEffectiveModelPrice(row.service_provider, row.model_id)
+  }
+
+  return {
+    deleted: deleted.length,
+    keys: deleted.map(row => `${row.service_provider}/${row.model_id}`),
+  }
+}
+
 export function normalizeServiceProvider(value: string) {
   return value.trim().toLowerCase().replace(/&/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '')
 }
@@ -321,9 +376,71 @@ export function priorityForSource(source: string) {
       return 50
     case 'llm-prices':
       return 10
+    case 'imported-json':
+    case 'seed_json':
+      return 5
     default:
       return 0
   }
+}
+
+async function syncEffectiveModelPrice(serviceProvider: string, modelId: string) {
+  const sql = getSql()
+  const rows = await sql`
+    select
+      service_provider,
+      model_id,
+      upstream_provider,
+      display_name,
+      input_per_1m,
+      output_per_1m,
+      source
+    from model_price_records
+    where service_provider = ${serviceProvider}
+      and model_id = ${modelId}
+    order by source_priority desc, updated_at desc
+    limit 1
+  ` as any[]
+
+  const next = rows[0]
+  if (!next) {
+    await sql`
+      delete from model_prices
+      where service_provider = ${serviceProvider}
+        and model_id = ${modelId}
+    `
+    return
+  }
+
+  await sql`
+    insert into model_prices (
+      service_provider,
+      model_id,
+      upstream_provider,
+      display_name,
+      input_per_1m,
+      output_per_1m,
+      source,
+      updated_at
+    )
+    values (
+      ${next.service_provider},
+      ${next.model_id},
+      ${next.upstream_provider},
+      ${next.display_name},
+      ${next.input_per_1m},
+      ${next.output_per_1m},
+      ${next.source},
+      now()
+    )
+    on conflict (service_provider, model_id) do update set
+      upstream_provider = excluded.upstream_provider,
+      display_name = excluded.display_name,
+      input_per_1m = excluded.input_per_1m,
+      output_per_1m = excluded.output_per_1m,
+      source = excluded.source,
+      updated_at = now()
+  `
 }
 
 export function buildMatchEvidence(input: {

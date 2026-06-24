@@ -96,6 +96,7 @@ interface AppState {
 
   modelPricing: Record<string, { input: number; output: number }>
   setModelPricing: (key: string, input: number, output: number) => void
+  removeModelPricing: (keys: string[]) => void
 
   builtinPricing: Record<string, { input: number; output: number; per: string }>
   loadBuiltinPricing: (data: Record<string, { input: number; output: number; per: string }>) => void
@@ -107,6 +108,7 @@ interface AppState {
 
   debugEntries: DebugEntry[]
   pushDebugEntry: (e: DebugEntry) => void
+  removeDebugEntry: (runId: string) => void
   clearDebugEntries: () => void
 
   isRunning: boolean
@@ -217,6 +219,16 @@ export const useStore = create<AppState>((set, get) => ({
     saveJSON('token-tester-model-pricing', next)
     return { modelPricing: next, builtinPricing: { ...s.builtinPricing, [key]: { input, output, per: '1M' } } }
   }),
+  removeModelPricing: (keys) => set((s) => {
+    const modelPricing = { ...s.modelPricing }
+    const builtinPricing = { ...s.builtinPricing }
+    for (const key of keys) {
+      delete modelPricing[key]
+      delete builtinPricing[key]
+    }
+    saveJSON('token-tester-model-pricing', modelPricing)
+    return { modelPricing, builtinPricing }
+  }),
 
   builtinPricing: {},
   loadBuiltinPricing: (data) => set({ builtinPricing: data }),
@@ -229,7 +241,17 @@ export const useStore = create<AppState>((set, get) => ({
   clearQueue: () => set({ queue: [] }),
 
   debugEntries: [],
-  pushDebugEntry: (e) => set((s) => ({ debugEntries: [e, ...s.debugEntries].slice(0, 50) })),
+  pushDebugEntry: (e) => set((s) => {
+    if (!e.runId) return { debugEntries: [e, ...s.debugEntries].slice(0, 50) }
+    const existingIndex = s.debugEntries.findIndex(entry => entry.runId === e.runId)
+    if (existingIndex === -1) return { debugEntries: [e, ...s.debugEntries].slice(0, 50) }
+    const next = [...s.debugEntries]
+    next[existingIndex] = e
+    return { debugEntries: next }
+  }),
+  removeDebugEntry: (runId) => set((s) => ({
+    debugEntries: s.debugEntries.filter(entry => entry.runId !== runId),
+  })),
   clearDebugEntries: () => set({ debugEntries: [] }),
 
   isRunning: false,

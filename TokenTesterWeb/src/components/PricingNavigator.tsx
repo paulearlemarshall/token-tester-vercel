@@ -2,9 +2,11 @@ import { Fragment, useCallback, useEffect, useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
 import { ArrowDown, ArrowUp, ChevronDown, Database, RefreshCw, Search, X } from 'lucide-react'
 import { webApi } from '../lib/web-api'
+import { useStore } from '../store'
 import { formatCurrency } from '../utils/formatters'
 
 interface PriceRecord {
+  id?: number
   key: string
   serviceProvider: string
   modelId: string
@@ -47,6 +49,7 @@ export function PricingNavigator({ onClose }: { onClose: () => void }) {
   const [expanded, setExpanded] = useState<string | null>(null)
   const [sortField, setSortField] = useState<SortField>('provider')
   const [sortDir, setSortDir] = useState<SortDir>('asc')
+  const [deletingKey, setDeletingKey] = useState<string | null>(null)
 
   const loadRecords = useCallback(async () => {
     setLoading(true)
@@ -131,6 +134,36 @@ export function PricingNavigator({ onClose }: { onClose: () => void }) {
     return filteredGroups
   }, [filtered, sortDir, sortField])
 
+  const refreshEffectivePricing = useCallback(async () => {
+    const pricing = await webApi.getPricing()
+    useStore.getState().loadBuiltinPricing(pricing)
+  }, [])
+
+  const deleteRecord = useCallback(async (record: PriceRecord) => {
+    const label = `${sourceLabel(record.source)} price for ${record.serviceProvider}/${record.modelId}`
+    const confirmed = window.confirm(`Delete ${label}?\n\nThe price can be repopulated later by provider discovery, llm-prices import, another imported source, or a manual override.`)
+    if (!confirmed) return
+
+    const key = `${record.key}:${record.source}:${record.id ?? 'legacy'}`
+    setDeletingKey(key)
+    setError('')
+    try {
+      const result = await webApi.deletePricing({
+        id: record.id,
+        serviceProvider: record.serviceProvider,
+        modelId: record.modelId,
+        source: record.source,
+      })
+      useStore.getState().removeModelPricing(result.keys?.length ? result.keys : [record.key])
+      await refreshEffectivePricing()
+      await loadRecords()
+    } catch (err: any) {
+      setError(err.message ?? String(err))
+    } finally {
+      setDeletingKey(null)
+    }
+  }, [loadRecords, refreshEffectivePricing])
+
   function toggleSort(field: SortField) {
     if (sortField === field) {
       setSortDir(current => current === 'asc' ? 'desc' : 'asc')
@@ -185,7 +218,7 @@ export function PricingNavigator({ onClose }: { onClose: () => void }) {
           </div>
           <select className="input w-44 py-1.5 text-xs" value={source} onChange={e => setSource(e.target.value)}>
             <option value="">All sources</option>
-            {sources.map(item => <option key={item} value={item}>{item}</option>)}
+            {sources.map(item => <option key={item} value={item}>{sourceLabel(item)}</option>)}
           </select>
           <select className="input w-44 py-1.5 text-xs" value={matchFilter} onChange={e => setMatchFilter(e.target.value)}>
             <option value="">All matches</option>
@@ -240,7 +273,7 @@ export function PricingNavigator({ onClose }: { onClose: () => void }) {
                       <td className="px-4 py-2">
                         {effective ? (
                           <span className="rounded-full border border-brand-gold/40 bg-brand-gold/10 px-2 py-0.5 text-[10px] font-semibold text-brand-charcoal dark:text-brand-gold">
-                            {effective.source} p{effective.sourcePriority}
+                            {sourceLabel(effective.source)} p{effective.sourcePriority}
                           </span>
                         ) : '-'}
                       </td>
@@ -254,8 +287,19 @@ export function PricingNavigator({ onClose }: { onClose: () => void }) {
                             {group.records.map(record => (
                               <div key={`${record.key}-${record.source}`} className="rounded-lg border border-surface-800 bg-surface-900 p-3">
                                 <div className="flex flex-wrap items-center justify-between gap-2">
-                                  <div className="font-mono text-xs text-surface-100">{record.source} · priority {record.sourcePriority}</div>
-                                  <div className="text-[10px] text-surface-500">{record.matchStatus} · {record.matchMethod ?? 'unknown'} · confidence {record.matchConfidence ?? '-'}</div>
+                                  <div>
+                                    <div className="font-mono text-xs text-surface-100">{sourceLabel(record.source)} · priority {record.sourcePriority}</div>
+                                    <div className="mt-0.5 text-[10px] text-surface-500">{record.matchStatus} · {record.matchMethod ?? 'unknown'} · confidence {record.matchConfidence ?? '-'}</div>
+                                  </div>
+                                  <button
+                                    type="button"
+                                    onClick={() => deleteRecord(record)}
+                                    disabled={deletingKey === `${record.key}:${record.source}:${record.id ?? 'legacy'}`}
+                                    className="rounded-md border border-red-900/60 bg-red-950/30 p-1 text-red-300 hover:border-red-700 hover:bg-red-950/50 disabled:cursor-wait disabled:opacity-50"
+                                    title="Delete this price source"
+                                  >
+                                    <X size={14} />
+                                  </button>
                                 </div>
                                 <div className="mt-2 grid grid-cols-2 gap-2 text-xs text-surface-300 md:grid-cols-4">
                                   <div>Input: <span className="font-mono">{formatCurrency(record.input)}</span></div>
@@ -265,7 +309,7 @@ export function PricingNavigator({ onClose }: { onClose: () => void }) {
                                 </div>
                                 <div className="mt-3 grid gap-2 md:grid-cols-3">
                                   <JsonDetails title="Match Evidence" value={record.matchEvidence} />
-                                  <JsonDetails title="Seed Payload" value={record.rawSourcePayload} />
+                                  <JsonDetails title="Source Payload" value={record.rawSourcePayload} />
                                   <JsonDetails title="Provider Payload" value={record.rawProviderPayload} />
                                 </div>
                               </div>
@@ -288,6 +332,23 @@ export function PricingNavigator({ onClose }: { onClose: () => void }) {
       </div>
     </div>
   )
+}
+
+function sourceLabel(source: string) {
+  switch (source) {
+    case 'provider-discovery':
+      return 'Provider discovery'
+    case 'manual':
+      return 'Manual override'
+    case 'llm-prices':
+      return 'llm-prices'
+    case 'seed_json':
+      return 'Imported JSON (legacy)'
+    case 'imported-json':
+      return 'Imported JSON'
+    default:
+      return source
+  }
 }
 
 function JsonDetails({ title, value }: { title: string; value: unknown }) {

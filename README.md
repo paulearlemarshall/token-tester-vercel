@@ -1,6 +1,6 @@
 # Token Tester Web
 
-Token Tester Web is the Vercel-deployed Next.js app for comparing model responses, token usage, latency, and estimated cost across multiple AI providers while keeping provider API keys on the server.
+Token Tester Web is the Vercel-only Next.js app for comparing AI model behavior across providers. It runs prompt and file tests, records response text, token usage, latency, estimated cost, provider request details, and keeps a persistent searchable Results Archive in Neon Postgres.
 
 Production app:
 
@@ -8,40 +8,55 @@ Production app:
 https://token-tester-web.vercel.app
 ```
 
-## What It Does
+## Repository Layout
 
-- Configures multiple providers and discovers their models.
-- Runs prompt and file-based tests across selected models.
-- Measures latency, token counts, and estimated cost.
-- Archives completed run results in Neon with prompt/file checksums, output text, token counts, latency, pricing, and provider/model metadata.
-- Stores pricing in Neon Postgres with manual, seeded, and provider-discovered overrides.
-- Skips unsupported attachments instead of forcing placeholder retries.
-- Surfaces raw pricing records, precedence, and evidence in a navigator UI.
-- Uses provider adapters so the browser sends normalized runs while the server builds provider-specific wire payloads.
+The deployable app lives in:
 
-## Core Workflow
+```text
+TokenTesterWeb/
+```
+
+Vercel must use `TokenTesterWeb` as the project Root Directory.
+
+## What The App Does
+
+- Configures multiple AI providers without exposing provider API keys to the browser.
+- Discovers provider models and imports live provider pricing when available.
+- Seeds pricing from `simonw/llm-prices` and allows manual or provider-discovered overrides.
+- Runs prompt, file, image, PDF, DOCX, single-file, and batch-file tests across selected models.
+- Preserves completed queue results when more models are added.
+- Archives every completed observation with hashes, timestamps, payloads, tokens, latency, price, and output.
+- Provides a Results Archive with filters, grouped views, charts, suppression, deletion, column sorting, column reordering, and XLS export.
+- Shows provider-specific handling rules so users can see how each provider receives files, prompts, images, PDFs, and API parameters.
+
+## Quick Start
 
 ```powershell
 cd TokenTesterWeb
 npm install
+vercel link
+vercel env pull .env.local
+npm run db:setup
+npm run dev
+```
+
+Open:
+
+```text
+http://localhost:3000
+```
+
+## Checks And Deployment
+
+```powershell
+cd TokenTesterWeb
 npm run lint
 npm run build
 vercel deploy --prod --yes
 ```
 
-## Key Notes
-
-- The deployable Next.js app lives in `TokenTesterWeb`; Vercel Git builds must use `TokenTesterWeb` as the project Root Directory.
-- Provider behavior is selected by adapter ID, not only by the broad `openai-compat`, `anthropic`, or `gemini` protocol type.
-- Gemini pricing is canonicalized under `google/*`.
-- Manual model price edits and provider-discovered prices persist to Neon.
-- DeepSeek and DeepSeek-routed models are treated as text-only.
-- Unsupported binary attachments are skipped before inference and count as zero tokens/cost.
-- OpenRouter PDFs are handled through OpenRouter's universal PDF parsing path.
-- xAI / Grok requests use the Responses API path in the web app.
-- The Pricing navigator is sortable and shows effective values plus underlying records.
-- The Results Archive tab slices persisted run history by provider, model, status, source, file, hashes, output text, and errors.
-
 ## Documentation
 
-- [TokenTesterWeb/README.md](TokenTesterWeb/README.md) covers architecture, pricing, providers, file handling, database setup, and deployment in detail.
+The full feature, architecture, database, provider, pricing, archive, and deployment guide is in:
+
+[TokenTesterWeb/README.md](TokenTesterWeb/README.md)

@@ -87,6 +87,14 @@ await sql`
     file_hash text,
     file_metadata jsonb,
     batch_files jsonb,
+    pdf_sent boolean not null default false,
+    pdf_file_size bigint,
+    image_sent boolean not null default false,
+    image_file_size bigint,
+    video_sent boolean not null default false,
+    video_file_size bigint,
+    audio_sent boolean not null default false,
+    audio_file_size bigint,
     input_tokens integer not null default 0,
     output_tokens integer not null default 0,
     total_tokens integer not null default 0,
@@ -109,6 +117,14 @@ await sql`
 
 await sql`alter table run_results add column if not exists suppressed boolean not null default false`
 await sql`alter table run_results add column if not exists record_key text`
+await sql`alter table run_results add column if not exists pdf_sent boolean not null default false`
+await sql`alter table run_results add column if not exists pdf_file_size bigint`
+await sql`alter table run_results add column if not exists image_sent boolean not null default false`
+await sql`alter table run_results add column if not exists image_file_size bigint`
+await sql`alter table run_results add column if not exists video_sent boolean not null default false`
+await sql`alter table run_results add column if not exists video_file_size bigint`
+await sql`alter table run_results add column if not exists audio_sent boolean not null default false`
+await sql`alter table run_results add column if not exists audio_file_size bigint`
 await sql`
   update run_results
   set record_key = concat_ws('|', service_provider, model, input_hash)

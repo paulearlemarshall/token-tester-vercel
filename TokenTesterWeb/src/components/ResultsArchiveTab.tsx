@@ -1,15 +1,41 @@
-import { useEffect, useMemo, useState } from 'react'
+import { type ReactNode, useEffect, useMemo, useState } from 'react'
 import { Archive, ArrowDown, ArrowUp, BarChart3, Database, EyeOff, RefreshCw, RotateCcw, Search, Table2, Trash2, X } from 'lucide-react'
 import {
   Bar, BarChart, CartesianGrid, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from 'recharts'
+import * as XLSX from 'xlsx'
 import { webApi } from '../lib/web-api'
 import type { ArchivedRunResult } from '../types'
-import { formatCurrency, formatDuration, formatNumber } from '../utils/formatters'
+import { formatCurrency, formatDuration, formatFileSize, formatNumber } from '../utils/formatters'
 
-type SortField = 'completedAt' | 'createdAt' | 'providerName' | 'model' | 'status' | 'sourceType' | 'inputTokens' | 'outputTokens' | 'latencyMs' | 'estimatedCost' | 'fileName'
+type SortField = 'completedAt' | 'createdAt' | 'providerName' | 'model' | 'status' | 'sourceType' | 'fileName' | 'prompt' | 'inputHash' | 'pdfSent' | 'pdfFileSize' | 'imageSent' | 'imageFileSize' | 'videoSent' | 'videoFileSize' | 'audioSent' | 'audioFileSize' | 'inputTokens' | 'outputTokens' | 'latencyMs' | 'estimatedCost' | 'suppressed'
 
 const COLORS = ['#f5c84c', '#57a6ff', '#37c391', '#f97316', '#a78bfa', '#ef4444', '#14b8a6', '#ec4899']
+
+const RECORD_COLUMNS: { id: SortField; label: string; cellClassName?: string; cell: (record: ArchivedRunResult) => ReactNode }[] = [
+  { id: 'completedAt', label: 'Completed', cellClassName: 'text-xs text-surface-400 whitespace-nowrap', cell: record => new Date(record.completedAt).toLocaleString() },
+  { id: 'createdAt', label: 'Archived', cellClassName: 'text-xs text-surface-400 whitespace-nowrap', cell: record => new Date(record.createdAt).toLocaleString() },
+  { id: 'providerName', label: 'Provider', cellClassName: 'text-surface-200', cell: record => record.providerName },
+  { id: 'model', label: 'Model', cellClassName: 'font-mono text-xs text-surface-200', cell: record => record.model },
+  { id: 'status', label: 'Status', cell: record => <StatusBadge status={record.status} /> },
+  { id: 'sourceType', label: 'Source', cellClassName: 'text-surface-300', cell: record => record.sourceType },
+  { id: 'fileName', label: 'File', cellClassName: 'text-surface-300', cell: record => <span title={record.filePath ?? undefined}>{record.fileName ?? '—'}</span> },
+  { id: 'prompt', label: 'Prompt', cellClassName: 'text-surface-300', cell: record => <span title={record.userMessage ?? undefined}>{promptPreview(record)}</span> },
+  { id: 'inputHash', label: 'Input Hash', cellClassName: 'font-mono text-[11px] text-surface-500', cell: record => <span title={record.inputHash}>{record.inputHash.slice(0, 12)}</span> },
+  { id: 'pdfSent', label: 'PDF Sent', cell: record => <YesNo value={record.pdfSent} /> },
+  { id: 'pdfFileSize', label: 'PDF Size', cellClassName: 'text-right font-mono text-xs', cell: record => mediaSize(record.pdfFileSize) },
+  { id: 'imageSent', label: 'Image Sent', cell: record => <YesNo value={record.imageSent} /> },
+  { id: 'imageFileSize', label: 'Image Size', cellClassName: 'text-right font-mono text-xs', cell: record => mediaSize(record.imageFileSize) },
+  { id: 'videoSent', label: 'Video Sent', cell: record => <YesNo value={record.videoSent} /> },
+  { id: 'videoFileSize', label: 'Video Size', cellClassName: 'text-right font-mono text-xs', cell: record => mediaSize(record.videoFileSize) },
+  { id: 'audioSent', label: 'Audio Sent', cell: record => <YesNo value={record.audioSent} /> },
+  { id: 'audioFileSize', label: 'Audio Size', cellClassName: 'text-right font-mono text-xs', cell: record => mediaSize(record.audioFileSize) },
+  { id: 'inputTokens', label: 'In', cellClassName: 'text-right font-mono text-xs', cell: record => formatNumber(record.inputTokens) },
+  { id: 'outputTokens', label: 'Out', cellClassName: 'text-right font-mono text-xs', cell: record => formatNumber(record.outputTokens) },
+  { id: 'latencyMs', label: 'Latency', cellClassName: 'text-right font-mono text-xs', cell: record => formatDuration(record.latencyMs) },
+  { id: 'estimatedCost', label: 'Cost', cellClassName: 'text-right font-mono text-xs', cell: record => formatCurrency(record.estimatedCost ?? 0) },
+  { id: 'suppressed', label: 'Suppressed', cell: record => record.suppressed ? <span className="rounded border border-surface-500/30 bg-surface-700 px-2 py-0.5 text-xs text-surface-300">Yes</span> : <span className="text-surface-500">No</span> },
+]
 
 export function ResultsArchiveTab() {
   const [records, setRecords] = useState<ArchivedRunResult[]>([])
@@ -28,6 +54,8 @@ export function ResultsArchiveTab() {
   const [sortField, setSortField] = useState<SortField>('completedAt')
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set())
+  const [columnOrder, setColumnOrder] = useState<SortField[]>(() => RECORD_COLUMNS.map(column => column.id))
+  const [draggedColumn, setDraggedColumn] = useState<SortField | null>(null)
 
   async function loadArchive() {
     setLoading(true)
@@ -121,10 +149,21 @@ export function ResultsArchiveTab() {
         case 'status': cmp = a.status.localeCompare(b.status); break
         case 'sourceType': cmp = a.sourceType.localeCompare(b.sourceType); break
         case 'fileName': cmp = (a.fileName ?? '').localeCompare(b.fileName ?? ''); break
+        case 'prompt': cmp = promptPreview(a).localeCompare(promptPreview(b)); break
+        case 'inputHash': cmp = a.inputHash.localeCompare(b.inputHash); break
+        case 'pdfSent': cmp = Number(a.pdfSent) - Number(b.pdfSent); break
+        case 'pdfFileSize': cmp = (a.pdfFileSize ?? 0) - (b.pdfFileSize ?? 0); break
+        case 'imageSent': cmp = Number(a.imageSent) - Number(b.imageSent); break
+        case 'imageFileSize': cmp = (a.imageFileSize ?? 0) - (b.imageFileSize ?? 0); break
+        case 'videoSent': cmp = Number(a.videoSent) - Number(b.videoSent); break
+        case 'videoFileSize': cmp = (a.videoFileSize ?? 0) - (b.videoFileSize ?? 0); break
+        case 'audioSent': cmp = Number(a.audioSent) - Number(b.audioSent); break
+        case 'audioFileSize': cmp = (a.audioFileSize ?? 0) - (b.audioFileSize ?? 0); break
         case 'inputTokens': cmp = a.inputTokens - b.inputTokens; break
         case 'outputTokens': cmp = a.outputTokens - b.outputTokens; break
         case 'latencyMs': cmp = a.latencyMs - b.latencyMs; break
         case 'estimatedCost': cmp = (a.estimatedCost ?? 0) - (b.estimatedCost ?? 0); break
+        case 'suppressed': cmp = Number(a.suppressed) - Number(b.suppressed); break
       }
       return cmp * sign
     })
@@ -153,11 +192,15 @@ export function ResultsArchiveTab() {
   const byProvider = useMemo(() => groupRecords(analysisRecords, r => r.providerName).slice(0, 12), [analysisRecords])
   const byStatus = useMemo(() => groupRecords(analysisRecords, r => r.status), [analysisRecords])
   const groupedRows = useMemo(() => {
-    if (tableView === 'file') return groupRecords(sorted, record => record.fileName || '(no file)')
-    if (tableView === 'prompt') return groupRecords(sorted, record => promptPreview(record))
+    if (tableView === 'file') return groupRecords(analysisRecords, record => record.fileName || '(no file)')
+    if (tableView === 'prompt') return groupRecords(analysisRecords, record => promptPreview(record))
     return []
-  }, [sorted, tableView])
+  }, [analysisRecords, tableView])
   const visibleIds = useMemo(() => sorted.map(record => record.id), [sorted])
+  const orderedColumns = useMemo(() => {
+    const columnsById = new Map(RECORD_COLUMNS.map(column => [column.id, column]))
+    return columnOrder.map(id => columnsById.get(id)).filter(Boolean) as typeof RECORD_COLUMNS
+  }, [columnOrder])
   const selectedCount = selectedIds.size
   const allVisibleSelected = visibleIds.length > 0 && visibleIds.every(id => selectedIds.has(id))
 
@@ -186,6 +229,19 @@ export function ResultsArchiveTab() {
       } else {
         visibleIds.forEach(id => next.add(id))
       }
+      return next
+    })
+  }
+
+  function moveColumn(source: SortField, target: SortField) {
+    if (source === target) return
+    setColumnOrder(current => {
+      const next = [...current]
+      const from = next.indexOf(source)
+      const to = next.indexOf(target)
+      if (from === -1 || to === -1) return current
+      const [item] = next.splice(from, 1)
+      next.splice(to, 0, item)
       return next
     })
   }
@@ -221,10 +277,79 @@ export function ResultsArchiveTab() {
     setSelectedIds(new Set())
   }
 
-  function SortHeader({ field, children, className }: { field: SortField; children: React.ReactNode; className?: string }) {
+  function exportArchiveXLSX() {
+    const rows = sorted.map(record => ({
+      ID: record.id,
+      'Run ID': record.runId,
+      'Record Key': record.recordKey,
+      Status: record.status,
+      Suppressed: record.suppressed ? 'Yes' : 'No',
+      'Provider ID': record.providerId ?? '',
+      Provider: record.providerName,
+      'Service Provider': record.serviceProvider,
+      Model: record.model,
+      'Source Type': record.sourceType,
+      'Source Label': record.sourceLabel,
+      'System Prompt': record.systemPrompt ?? '',
+      'System Prompt Hash': record.systemPromptHash ?? '',
+      'User Message': record.userMessage ?? '',
+      'User Message Hash': record.userMessageHash ?? '',
+      'Input Hash': record.inputHash,
+      'File Name': record.fileName ?? '',
+      'File Path': record.filePath ?? '',
+      'File Size': record.fileSize ?? '',
+      'File Type': record.fileType ?? '',
+      'File MIME Type': record.fileMimeType ?? '',
+      'File Hash': record.fileHash ?? '',
+      'File Metadata JSON': JSON.stringify(record.fileMetadata ?? null),
+      'Batch Files JSON': JSON.stringify(record.batchFiles ?? null),
+      'PDF Sent': record.pdfSent ? 'Yes' : 'No',
+      'PDF File Size': record.pdfFileSize ?? '',
+      'Image Sent': record.imageSent ? 'Yes' : 'No',
+      'Image File Size': record.imageFileSize ?? '',
+      'Video Sent': record.videoSent ? 'Yes' : 'No',
+      'Video File Size': record.videoFileSize ?? '',
+      'Audio Sent': record.audioSent ? 'Yes' : 'No',
+      'Audio File Size': record.audioFileSize ?? '',
+      'Input Tokens': record.inputTokens,
+      'Output Tokens': record.outputTokens,
+      'Total Tokens': record.totalTokens,
+      'Local Input Tokens': record.localInputTokens ?? '',
+      'Latency Ms': record.latencyMs,
+      'Input Price Per 1M': record.inputPricePer1m ?? '',
+      'Output Price Per 1M': record.outputPricePer1m ?? '',
+      'Estimated Cost': record.estimatedCost ?? '',
+      'Response Text': record.responseText ?? '',
+      Error: record.error ?? '',
+      'Request Payload JSON': JSON.stringify(record.requestPayload ?? null),
+      'Response Payload JSON': JSON.stringify(record.responsePayload ?? null),
+      'Run Started At': record.runStartedAt ?? '',
+      'Completed At': record.completedAt,
+      'Created At': record.createdAt,
+      'Updated At': record.updatedAt,
+    }))
+    const workbook = XLSX.utils.book_new()
+    const sheet = XLSX.utils.json_to_sheet(rows)
+    XLSX.utils.book_append_sheet(workbook, sheet, 'Archive Records')
+    XLSX.writeFile(workbook, `token-tester-archive-${new Date().toISOString().slice(0, 10)}.xlsx`)
+  }
+
+  function SortHeader({ field, children, className }: { field: SortField; children: ReactNode; className?: string }) {
     const active = sortField === field
     return (
-      <th onClick={() => toggleSort(field)} className={`cursor-pointer select-none px-4 py-2 text-left text-xs font-medium text-surface-400 ${className ?? ''}`}>
+      <th
+        draggable
+        onClick={() => toggleSort(field)}
+        onDragStart={() => setDraggedColumn(field)}
+        onDragOver={event => event.preventDefault()}
+        onDrop={() => {
+          if (draggedColumn) moveColumn(draggedColumn, field)
+          setDraggedColumn(null)
+        }}
+        onDragEnd={() => setDraggedColumn(null)}
+        title="Click to sort. Drag to move column."
+        className={`cursor-move select-none px-4 py-2 text-left text-xs font-medium text-surface-400 ${draggedColumn === field ? 'bg-surface-800 text-surface-100' : ''} ${className ?? ''}`}
+      >
         <span className="inline-flex items-center gap-1">
           {children}
           {active ? (sortDir === 'asc' ? <ArrowUp size={11} className="text-brand-gold" /> : <ArrowDown size={11} className="text-brand-gold" />) : null}
@@ -284,6 +409,9 @@ export function ResultsArchiveTab() {
         <button onClick={resetFilters} className="btn-secondary flex items-center gap-1.5">
           <X size={15} /> Reset
         </button>
+        <button onClick={exportArchiveXLSX} disabled={sorted.length === 0} className="btn-secondary flex items-center gap-1.5">
+          Export XLS
+        </button>
         <div className="ml-auto flex rounded-lg border border-surface-700 bg-surface-850 p-1">
           <button onClick={() => setView('charts')} className={`px-3 py-1.5 text-xs rounded-md flex items-center gap-1.5 ${view === 'charts' ? 'bg-brand-gold text-brand-charcoal' : 'text-surface-400 hover:text-surface-100'}`}>
             <BarChart3 size={14} /> Charts
@@ -337,20 +465,11 @@ export function ResultsArchiveTab() {
                   <th className="px-4 py-2 text-left">
                     <input type="checkbox" checked={allVisibleSelected} onChange={toggleVisibleSelection} aria-label="Select visible archive records" />
                   </th>
-                  <SortHeader field="completedAt">Completed</SortHeader>
-                  <SortHeader field="createdAt">Archived</SortHeader>
-                  <SortHeader field="providerName">Provider</SortHeader>
-                  <SortHeader field="model">Model</SortHeader>
-                  <SortHeader field="status">Status</SortHeader>
-                  <SortHeader field="sourceType">Source</SortHeader>
-                  <SortHeader field="fileName">File</SortHeader>
-                  <th className="px-4 py-2 text-left text-xs font-medium text-surface-400">Prompt</th>
-                  <th className="px-4 py-2 text-left text-xs font-medium text-surface-400">Input Hash</th>
-                  <SortHeader field="inputTokens" className="text-right">In</SortHeader>
-                  <SortHeader field="outputTokens" className="text-right">Out</SortHeader>
-                  <SortHeader field="latencyMs" className="text-right">Latency</SortHeader>
-                  <SortHeader field="estimatedCost" className="text-right">Cost</SortHeader>
-                  <th className="px-4 py-2 text-left text-xs font-medium text-surface-400">Flags</th>
+                  {orderedColumns.map(column => (
+                    <SortHeader key={column.id} field={column.id} className={column.cellClassName?.includes('text-right') ? 'text-right' : undefined}>
+                      {column.label}
+                    </SortHeader>
+                  ))}
                 </tr>
               ) : (
                 <tr>
@@ -368,20 +487,11 @@ export function ResultsArchiveTab() {
                     <td className="px-4 py-2">
                       <input type="checkbox" checked={selectedIds.has(record.id)} onChange={() => toggleSelected(record.id)} aria-label={`Select archive record ${record.id}`} />
                     </td>
-                    <td className="px-4 py-2 text-xs text-surface-400 whitespace-nowrap">{new Date(record.completedAt).toLocaleString()}</td>
-                    <td className="px-4 py-2 text-xs text-surface-400 whitespace-nowrap">{new Date(record.createdAt).toLocaleString()}</td>
-                    <td className="px-4 py-2 text-surface-200">{record.providerName}</td>
-                    <td className="px-4 py-2 font-mono text-xs text-surface-200">{record.model}</td>
-                    <td className="px-4 py-2"><StatusBadge status={record.status} /></td>
-                    <td className="px-4 py-2 text-surface-300">{record.sourceType}</td>
-                    <td className="px-4 py-2 text-surface-300" title={record.filePath ?? undefined}>{record.fileName ?? '—'}</td>
-                    <td className="px-4 py-2 text-surface-300" title={record.userMessage ?? undefined}>{promptPreview(record)}</td>
-                    <td className="px-4 py-2 font-mono text-[11px] text-surface-500" title={record.inputHash}>{record.inputHash.slice(0, 12)}</td>
-                    <td className="px-4 py-2 text-right font-mono text-xs">{formatNumber(record.inputTokens)}</td>
-                    <td className="px-4 py-2 text-right font-mono text-xs">{formatNumber(record.outputTokens)}</td>
-                    <td className="px-4 py-2 text-right font-mono text-xs">{formatDuration(record.latencyMs)}</td>
-                    <td className="px-4 py-2 text-right font-mono text-xs">{formatCurrency(record.estimatedCost ?? 0)}</td>
-                    <td className="px-4 py-2">{record.suppressed ? <span className="rounded border border-surface-500/30 bg-surface-700 px-2 py-0.5 text-xs text-surface-300">suppressed</span> : '—'}</td>
+                    {orderedColumns.map(column => (
+                      <td key={column.id} className={`px-4 py-2 ${column.cellClassName ?? ''}`}>
+                        {column.cell(record)}
+                      </td>
+                    ))}
                   </tr>
                 )) : groupedRows.map(row => (
                   <tr key={row.name} className="border-b border-surface-800 hover:bg-surface-850">
@@ -394,7 +504,7 @@ export function ResultsArchiveTab() {
                 ))}
             </tbody>
           </table>
-          {sorted.length === 0 && (
+          {((tableView === 'records' && sorted.length === 0) || (tableView !== 'records' && groupedRows.length === 0)) && (
             <div className="flex h-56 items-center justify-center text-sm text-surface-500">
               <Database size={18} className="mr-2" /> No archived results match the current filters.
             </div>
@@ -412,6 +522,16 @@ function Metric({ label, value }: { label: string; value: string }) {
       <div className="mt-1 truncate font-mono text-sm text-surface-100">{value}</div>
     </div>
   )
+}
+
+function YesNo({ value }: { value: boolean }) {
+  return value
+    ? <span className="rounded border border-emerald-400/30 bg-emerald-400/10 px-2 py-0.5 text-xs text-emerald-300">Yes</span>
+    : <span className="text-surface-500">No</span>
+}
+
+function mediaSize(value?: number | null) {
+  return value && value > 0 ? formatFileSize(value) : '-'
 }
 
 function FilterSelect({ value, onChange, options, label }: { value: string; onChange: (value: string) => void; options: string[]; label: string }) {

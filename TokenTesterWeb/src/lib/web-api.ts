@@ -77,6 +77,15 @@ export const webApi = {
     }, 'PUT')
   },
 
+  deletePricing(params: {
+    id?: number
+    serviceProvider?: string
+    modelId?: string
+    source?: string
+  }) {
+    return sendJson<{ deleted: number; keys: string[] }>('/api/pricing', params, 'DELETE')
+  },
+
   async countTokens(text: string) {
     try {
       return encode(text).length

@@ -24,6 +24,14 @@ export interface RunResultInput {
   fileHash?: string | null
   fileMetadata?: unknown
   batchFiles?: unknown
+  pdfSent?: boolean
+  pdfFileSize?: number | null
+  imageSent?: boolean
+  imageFileSize?: number | null
+  videoSent?: boolean
+  videoFileSize?: number | null
+  audioSent?: boolean
+  audioFileSize?: number | null
   inputTokens?: number
   outputTokens?: number
   totalTokens?: number
@@ -70,6 +78,14 @@ async function ensureRunResultsSchema() {
       file_hash text,
       file_metadata jsonb,
       batch_files jsonb,
+      pdf_sent boolean not null default false,
+      pdf_file_size bigint,
+      image_sent boolean not null default false,
+      image_file_size bigint,
+      video_sent boolean not null default false,
+      video_file_size bigint,
+      audio_sent boolean not null default false,
+      audio_file_size bigint,
       input_tokens integer not null default 0,
       output_tokens integer not null default 0,
       total_tokens integer not null default 0,
@@ -91,6 +107,14 @@ async function ensureRunResultsSchema() {
   `
   await sql`alter table run_results add column if not exists suppressed boolean not null default false`
   await sql`alter table run_results add column if not exists record_key text`
+  await sql`alter table run_results add column if not exists pdf_sent boolean not null default false`
+  await sql`alter table run_results add column if not exists pdf_file_size bigint`
+  await sql`alter table run_results add column if not exists image_sent boolean not null default false`
+  await sql`alter table run_results add column if not exists image_file_size bigint`
+  await sql`alter table run_results add column if not exists video_sent boolean not null default false`
+  await sql`alter table run_results add column if not exists video_file_size bigint`
+  await sql`alter table run_results add column if not exists audio_sent boolean not null default false`
+  await sql`alter table run_results add column if not exists audio_file_size bigint`
   await sql`
     update run_results
     set record_key = concat_ws('|', service_provider, model, input_hash)
@@ -144,6 +168,14 @@ export async function saveRunResult(input: RunResultInput) {
       file_hash,
       file_metadata,
       batch_files,
+      pdf_sent,
+      pdf_file_size,
+      image_sent,
+      image_file_size,
+      video_sent,
+      video_file_size,
+      audio_sent,
+      audio_file_size,
       input_tokens,
       output_tokens,
       total_tokens,
@@ -184,6 +216,14 @@ export async function saveRunResult(input: RunResultInput) {
       ${input.fileHash ?? null},
       ${jsonOrNull(input.fileMetadata)}::jsonb,
       ${jsonOrNull(input.batchFiles)}::jsonb,
+      ${input.pdfSent ?? false},
+      ${input.pdfFileSize ?? null},
+      ${input.imageSent ?? false},
+      ${input.imageFileSize ?? null},
+      ${input.videoSent ?? false},
+      ${input.videoFileSize ?? null},
+      ${input.audioSent ?? false},
+      ${input.audioFileSize ?? null},
       ${input.inputTokens ?? 0},
       ${input.outputTokens ?? 0},
       ${input.totalTokens ?? 0},
@@ -223,6 +263,14 @@ export async function saveRunResult(input: RunResultInput) {
       file_hash = excluded.file_hash,
       file_metadata = excluded.file_metadata,
       batch_files = excluded.batch_files,
+      pdf_sent = excluded.pdf_sent,
+      pdf_file_size = excluded.pdf_file_size,
+      image_sent = excluded.image_sent,
+      image_file_size = excluded.image_file_size,
+      video_sent = excluded.video_sent,
+      video_file_size = excluded.video_file_size,
+      audio_sent = excluded.audio_sent,
+      audio_file_size = excluded.audio_file_size,
       input_tokens = excluded.input_tokens,
       output_tokens = excluded.output_tokens,
       total_tokens = excluded.total_tokens,
@@ -273,6 +321,14 @@ export async function getRunResults(limit = 1000) {
       file_hash,
       file_metadata,
       batch_files,
+      pdf_sent,
+      pdf_file_size,
+      image_sent,
+      image_file_size,
+      video_sent,
+      video_file_size,
+      audio_sent,
+      audio_file_size,
       input_tokens,
       output_tokens,
       total_tokens,
@@ -353,6 +409,14 @@ function rowToRunResult(row: any) {
     fileHash: row.file_hash,
     fileMetadata: row.file_metadata,
     batchFiles: row.batch_files,
+    pdfSent: Boolean(row.pdf_sent),
+    pdfFileSize: row.pdf_file_size == null ? null : Number(row.pdf_file_size),
+    imageSent: Boolean(row.image_sent),
+    imageFileSize: row.image_file_size == null ? null : Number(row.image_file_size),
+    videoSent: Boolean(row.video_sent),
+    videoFileSize: row.video_file_size == null ? null : Number(row.video_file_size),
+    audioSent: Boolean(row.audio_sent),
+    audioFileSize: row.audio_file_size == null ? null : Number(row.audio_file_size),
     inputTokens: Number(row.input_tokens ?? 0),
     outputTokens: Number(row.output_tokens ?? 0),
     totalTokens: Number(row.total_tokens ?? 0),
