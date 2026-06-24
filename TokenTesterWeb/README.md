@@ -202,7 +202,7 @@ Built-in providers:
 
 | Provider | Adapter ID | API key env | Notes |
 | --- | --- | --- | --- |
-| OpenAI | `openai` | `OPENAI_API_KEY` | OpenAI chat completions with OpenAI-specific file/audio capability rules. |
+| OpenAI | `openai` | `OPENAI_API_KEY` | Text/image/doc: Responses API (/v1/responses). Audio (chat models): /v1/chat/completions with input_audio. Audio (transcription models): /v1/audio/transcriptions multipart upload. |
 | OpenRouter | `openrouter` | `OPENROUTER_API_KEY` | OpenAI-compatible API plus OpenRouter model metadata, universal PDF handling, and OpenRouter-specific audio payloads. |
 | SS&C AI Gateway | `ssnc-ai-gateway` | `SSC_CLOUD_API_KEY` | OpenAI-compatible gateway with optional project header. |
 | Anthropic | `anthropic` | `ANTHROPIC_API_KEY` | Uses Anthropic Messages API. |
@@ -244,9 +244,11 @@ Examples:
 - Anthropic runs use `/v1/messages`, `anthropic-version`, `system`, and `messages`.
 - Gemini runs use `generateContent`, `contents`, and `generationConfig.maxOutputTokens`.
 - Gemini can send image, document, audio, and video attachments through `inlineData`.
-- OpenAI-native runs (text/image/doc only) use `/v1/responses` (Responses API), `input`, top-level `instructions` for system prompt, and `max_output_tokens`.
+- OpenAI-native runs have three routing branches:
+  - **Text/image/doc**: `/v1/responses` (Responses API), `{ model, input, instructions?, max_output_tokens }`.
+  - **Audio on chat models** (gpt-audio-*): `/v1/chat/completions`, `{ model, messages, max_tokens }`, with `input_audio: { data, format }`. No file-name labels in text — media is sent natively.
+  - **Audio on transcription models** (whisper-*, gpt-4o-transcribe-*): `/v1/audio/transcriptions` as multipart form upload.
 - Other OpenAI-compatible adapters (openrouter, deepseek, mistral) still use `/v1/chat/completions`, `messages`, and either `max_tokens` or `max_completion_tokens` for reasoning-style models.
-- OpenAI audio attachments: chat models (gpt-audio-*) use `/v1/chat/completions` with `input_audio`; transcription models (whisper-*, gpt-4o-transcribe-*) use `/v1/audio/transcriptions` as multipart form uploads.
 - OpenRouter is treated as PDF-capable through its universal PDF path, while image and audio support are model-dependent.
 - OpenRouter audio attachments use `input_audio` with `inputAudio: { data, format }`.
 - OpenRouter transcription-output models use `/v1/audio/transcriptions` for audio-only runs.

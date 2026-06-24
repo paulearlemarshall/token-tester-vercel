@@ -40,9 +40,11 @@ This directory is the Vercel-deployable Next.js App Router port of the Token Tes
 ## Provider Notes
 
 - OpenAI-compatible providers (openrouter, deepseek, mistral, etc.) call `{baseUrl}/v1/models` and `{baseUrl}/v1/chat/completions`.
-- The `openai` adapter uses the Responses API at `{baseUrl}/v1/responses` for text/image/doc with `input` (content parts: `input_text`, `input_image`, `input_file`) and top-level `instructions` instead of system messages.
-- Audio on chat models (gpt-audio-*) falls back to `/v1/chat/completions` with `{ model, messages, max_tokens }` and `input_audio` content parts.
-- Audio on transcription models (whisper-*, gpt-4o-transcribe-*) routes to `/v1/audio/transcriptions` as multipart form uploads.
+- The `openai` adapter has three routing branches:
+  - **Text/image/doc**: `/v1/responses` (Responses API) with `{ model, input, instructions?, max_output_tokens }`. Content parts: `input_text`, `input_image`, `input_file`. System prompt in top-level `instructions`.
+  - **Audio on chat models** (gpt-audio-*): `/v1/chat/completions` with `{ model, messages, max_tokens }`. Uses `input_audio` content parts with `input_audio: { data, format }`. The text part uses `input.userMessage` directly (no file-name labels — they confuse the model when media is sent natively).
+  - **Audio on transcription models** (whisper-*, gpt-4o-transcribe-*): `/v1/audio/transcriptions` as multipart form uploads (`model` + `file` blob).
+- Response text extraction tries `message.content`, `message.audio.transcript`, and several other fallbacks.
 - The `openrouter` adapter uses OpenRouter's `input_audio` content part with `inputAudio: { data, format }`.
 - OpenRouter model discovery stores `architecture.input_modalities` and `architecture.output_modalities`; audio-only runs on transcription-output models use `/v1/audio/transcriptions`.
 - xAI is configured as OpenAI-compatible at `https://api.x.ai` using `XAI_API_KEY`.
