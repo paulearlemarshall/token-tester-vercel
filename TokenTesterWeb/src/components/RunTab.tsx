@@ -203,13 +203,16 @@ export function RunTab() {
       const rate = run.priceOverride && (run.priceOverride.input > 0 || run.priceOverride.output > 0)
         ? { ...run.priceOverride, per: '1M' }
         : { ...effectivePricing(run.providerName, run.model), per: '1M' }
+      const serviceProvider = canonicalProviderKey(run.providerName)
+      const recordKey = `${serviceProvider}|${run.model}|${inputHash}`
 
       await webApi.saveArchivedResult({
-        runId: run.id,
+        runId: `${run.id}:${crypto.randomUUID()}`,
+        recordKey,
         status,
         providerId: run.providerId,
         providerName: run.providerName,
-        serviceProvider: canonicalProviderKey(run.providerName),
+        serviceProvider,
         model: run.model,
         sourceType: run.sourceType,
         sourceLabel: run.sourceLabel,

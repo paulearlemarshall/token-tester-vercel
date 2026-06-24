@@ -66,6 +66,7 @@ await sql`
   create table if not exists run_results (
     id bigserial primary key,
     run_id text not null unique,
+    record_key text,
     status text not null,
     provider_id text,
     provider_name text not null,
@@ -107,13 +108,22 @@ await sql`
 `
 
 await sql`alter table run_results add column if not exists suppressed boolean not null default false`
+await sql`alter table run_results add column if not exists record_key text`
+await sql`
+  update run_results
+  set record_key = concat_ws('|', service_provider, model, input_hash)
+  where record_key is null
+`
+await sql`alter table run_results alter column record_key set not null`
 
 await sql`create index if not exists run_results_completed_idx on run_results (completed_at desc)`
+await sql`create index if not exists run_results_created_idx on run_results (created_at desc)`
 await sql`create index if not exists run_results_provider_model_idx on run_results (service_provider, model, completed_at desc)`
 await sql`create index if not exists run_results_status_idx on run_results (status, completed_at desc)`
 await sql`create index if not exists run_results_input_hash_idx on run_results (input_hash)`
 await sql`create index if not exists run_results_file_hash_idx on run_results (file_hash)`
 await sql`create index if not exists run_results_suppressed_idx on run_results (suppressed, completed_at desc)`
+await sql`create index if not exists run_results_record_key_idx on run_results (record_key, completed_at desc, created_at desc)`
 
 console.log('model_prices and run_results schema is ready')
 

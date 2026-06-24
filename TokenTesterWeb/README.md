@@ -155,9 +155,11 @@ The archived record also stores:
 - Input, output, total, and local token counts.
 - Latency, pricing used, and estimated cost.
 - Response text, error text, provider request payload, and response payload.
-- Run start and completion timestamps.
+- Run start, completion, archive creation, and update timestamps.
 
-`GET /api/results` returns recent archived records for the Results Archive tab. The route lazily creates the archive table if it is missing, so a deployed app can begin archiving before `npm run db:setup` has been run manually. `PATCH /api/results` bulk suppresses or restores archive records, and `DELETE /api/results` permanently deletes selected archive records.
+Archive rows are append-only observations. Each completed attempt gets a fresh `run_id`, while `record_key` groups equivalent observations by canonical provider, model, and input checksum. The Results Archive defaults to reporting the newest observation per `record_key`; switch to `All observations` to inspect historical repeats of the same file/prompt/model combination.
+
+`GET /api/results` returns recent archived observations for the Results Archive tab. The route lazily creates the archive table if it is missing, so a deployed app can begin archiving before `npm run db:setup` has been run manually. `PATCH /api/results` bulk suppresses or restores archive records, and `DELETE /api/results` permanently deletes selected archive records.
 
 ## Results Archive
 
@@ -168,7 +170,8 @@ It supports:
 - Free-text smart filtering across provider, model, source, file name/path, hashes, output text, and errors.
 - Facet filters for provider, model, status, source type, and recorded file name.
 - Active/all/suppressed visibility filters.
-- Sortable result rows for completion time, provider, model, status, source, file, token counts, latency, and estimated cost.
+- Latest-per-checksum reporting mode plus all-observations history mode.
+- Sortable result rows for completion time, archive creation time, provider, model, status, source, file, token counts, latency, and estimated cost.
 - Multi-select row actions for suppress, restore, and confirmed permanent delete.
 - Suppression keeps the record but excludes it from summary metrics and charts.
 - Grouped table views by file name or by the first few words of the prompt.
@@ -246,6 +249,7 @@ Run archives are stored in:
 ```sql
 run_results (
   run_id text not null unique,
+  record_key text not null,
   status text not null,
   provider_id text,
   provider_name text not null,

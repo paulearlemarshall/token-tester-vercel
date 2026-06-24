@@ -126,6 +126,7 @@ export interface AppConfig {
 export interface ArchivedRunResult {
   id: number
   runId: string
+  recordKey: string
   status: 'success' | 'error' | 'skipped' | string
   providerId?: string | null
   providerName: string

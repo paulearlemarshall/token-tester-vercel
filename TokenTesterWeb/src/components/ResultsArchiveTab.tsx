@@ -7,7 +7,7 @@ import { webApi } from '../lib/web-api'
 import type { ArchivedRunResult } from '../types'
 import { formatCurrency, formatDuration, formatNumber } from '../utils/formatters'
 
-type SortField = 'completedAt' | 'providerName' | 'model' | 'status' | 'sourceType' | 'inputTokens' | 'outputTokens' | 'latencyMs' | 'estimatedCost' | 'fileName'
+type SortField = 'completedAt' | 'createdAt' | 'providerName' | 'model' | 'status' | 'sourceType' | 'inputTokens' | 'outputTokens' | 'latencyMs' | 'estimatedCost' | 'fileName'
 
 const COLORS = ['#f5c84c', '#57a6ff', '#37c391', '#f97316', '#a78bfa', '#ef4444', '#14b8a6', '#ec4899']
 
@@ -24,6 +24,7 @@ export function ResultsArchiveTab() {
   const [view, setView] = useState<'table' | 'charts'>('charts')
   const [tableView, setTableView] = useState<'records' | 'file' | 'prompt'>('records')
   const [visibility, setVisibility] = useState<'active' | 'all' | 'suppressed'>('active')
+  const [archiveMode, setArchiveMode] = useState<'latest' | 'history'>('latest')
   const [sortField, setSortField] = useState<SortField>('completedAt')
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set())
@@ -63,10 +64,24 @@ export function ResultsArchiveTab() {
   const statuses = useMemo(() => [...new Set(records.map(r => r.status).filter(Boolean))].sort(), [records])
   const sourceTypes = useMemo(() => [...new Set(records.map(r => r.sourceType).filter(Boolean))].sort(), [records])
   const fileNames = useMemo(() => [...new Set(records.map(r => r.fileName || '(no file)'))].sort(), [records])
+  const visibleRecords = useMemo(() => {
+    if (archiveMode === 'history') return records
+    const latest = new Map<string, ArchivedRunResult>()
+    for (const record of records) {
+      const key = record.recordKey || `${record.serviceProvider}|${record.model}|${record.inputHash}`
+      const current = latest.get(key)
+      const recordTime = Math.max(new Date(record.completedAt).getTime(), new Date(record.createdAt).getTime())
+      const currentTime = current ? Math.max(new Date(current.completedAt).getTime(), new Date(current.createdAt).getTime()) : -Infinity
+      if (!current || recordTime > currentTime || (recordTime === currentTime && record.id > current.id)) {
+        latest.set(key, record)
+      }
+    }
+    return Array.from(latest.values())
+  }, [records, archiveMode])
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase()
-    return records.filter(record => {
+    return visibleRecords.filter(record => {
       if (visibility === 'active' && record.suppressed) return false
       if (visibility === 'suppressed' && !record.suppressed) return false
       if (provider && record.providerName !== provider) return false
@@ -92,7 +107,7 @@ export function ResultsArchiveTab() {
       ].filter(Boolean).join(' ').toLowerCase()
       return haystack.includes(q)
     })
-  }, [records, query, provider, model, status, sourceType, fileName, visibility])
+  }, [visibleRecords, query, provider, model, status, sourceType, fileName, visibility])
 
   const sorted = useMemo(() => {
     const sign = sortDir === 'asc' ? 1 : -1
@@ -100,6 +115,7 @@ export function ResultsArchiveTab() {
       let cmp = 0
       switch (sortField) {
         case 'completedAt': cmp = new Date(a.completedAt).getTime() - new Date(b.completedAt).getTime(); break
+        case 'createdAt': cmp = new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime(); break
         case 'providerName': cmp = a.providerName.localeCompare(b.providerName); break
         case 'model': cmp = a.model.localeCompare(b.model); break
         case 'status': cmp = a.status.localeCompare(b.status); break
@@ -200,6 +216,7 @@ export function ResultsArchiveTab() {
     setSourceType('')
     setFileName('')
     setVisibility('active')
+    setArchiveMode('latest')
     setTableView('records')
     setSelectedIds(new Set())
   }
@@ -255,6 +272,10 @@ export function ResultsArchiveTab() {
         <FilterSelect value={status} onChange={setStatus} options={statuses} label="All statuses" />
         <FilterSelect value={sourceType} onChange={setSourceType} options={sourceTypes} label="All sources" />
         <FilterSelect value={fileName} onChange={setFileName} options={fileNames} label="All files" />
+        <select value={archiveMode} onChange={e => setArchiveMode(e.target.value as typeof archiveMode)} className="input min-w-44">
+          <option value="latest">Latest per checksum</option>
+          <option value="history">All observations</option>
+        </select>
         <select value={visibility} onChange={e => setVisibility(e.target.value as typeof visibility)} className="input min-w-36">
           <option value="active">Active only</option>
           <option value="all">Active + suppressed</option>
@@ -317,6 +338,7 @@ export function ResultsArchiveTab() {
                     <input type="checkbox" checked={allVisibleSelected} onChange={toggleVisibleSelection} aria-label="Select visible archive records" />
                   </th>
                   <SortHeader field="completedAt">Completed</SortHeader>
+                  <SortHeader field="createdAt">Archived</SortHeader>
                   <SortHeader field="providerName">Provider</SortHeader>
                   <SortHeader field="model">Model</SortHeader>
                   <SortHeader field="status">Status</SortHeader>
@@ -347,6 +369,7 @@ export function ResultsArchiveTab() {
                       <input type="checkbox" checked={selectedIds.has(record.id)} onChange={() => toggleSelected(record.id)} aria-label={`Select archive record ${record.id}`} />
                     </td>
                     <td className="px-4 py-2 text-xs text-surface-400 whitespace-nowrap">{new Date(record.completedAt).toLocaleString()}</td>
+                    <td className="px-4 py-2 text-xs text-surface-400 whitespace-nowrap">{new Date(record.createdAt).toLocaleString()}</td>
                     <td className="px-4 py-2 text-surface-200">{record.providerName}</td>
                     <td className="px-4 py-2 font-mono text-xs text-surface-200">{record.model}</td>
                     <td className="px-4 py-2"><StatusBadge status={record.status} /></td>

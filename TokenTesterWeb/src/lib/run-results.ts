@@ -3,6 +3,7 @@ import { normalizeServiceProvider } from './pricing'
 
 export interface RunResultInput {
   runId: string
+  recordKey?: string
   status: string
   providerId?: string
   providerName: string
@@ -48,6 +49,7 @@ async function ensureRunResultsSchema() {
     create table if not exists run_results (
       id bigserial primary key,
       run_id text not null unique,
+      record_key text,
       status text not null,
       provider_id text,
       provider_name text not null,
@@ -88,12 +90,21 @@ async function ensureRunResultsSchema() {
     )
   `
   await sql`alter table run_results add column if not exists suppressed boolean not null default false`
+  await sql`alter table run_results add column if not exists record_key text`
+  await sql`
+    update run_results
+    set record_key = concat_ws('|', service_provider, model, input_hash)
+    where record_key is null
+  `
+  await sql`alter table run_results alter column record_key set not null`
   await sql`create index if not exists run_results_completed_idx on run_results (completed_at desc)`
+  await sql`create index if not exists run_results_created_idx on run_results (created_at desc)`
   await sql`create index if not exists run_results_provider_model_idx on run_results (service_provider, model, completed_at desc)`
   await sql`create index if not exists run_results_status_idx on run_results (status, completed_at desc)`
   await sql`create index if not exists run_results_input_hash_idx on run_results (input_hash)`
   await sql`create index if not exists run_results_file_hash_idx on run_results (file_hash)`
   await sql`create index if not exists run_results_suppressed_idx on run_results (suppressed, completed_at desc)`
+  await sql`create index if not exists run_results_record_key_idx on run_results (record_key, completed_at desc, created_at desc)`
   schemaReady = true
 }
 
@@ -105,12 +116,14 @@ export async function saveRunResult(input: RunResultInput) {
   await ensureRunResultsSchema()
   const sql = getSql()
   const serviceProvider = normalizeServiceProvider(input.serviceProvider || input.providerName)
+  const recordKey = input.recordKey || `${serviceProvider}|${input.model}|${input.inputHash}`
   const completedAt = input.completedAt ? new Date(input.completedAt).toISOString() : new Date().toISOString()
   const runStartedAt = input.runStartedAt ? new Date(input.runStartedAt).toISOString() : null
 
   await sql`
     insert into run_results (
       run_id,
+      record_key,
       status,
       provider_id,
       provider_name,
@@ -150,6 +163,7 @@ export async function saveRunResult(input: RunResultInput) {
     )
     values (
       ${input.runId},
+      ${recordKey},
       ${input.status},
       ${input.providerId ?? null},
       ${input.providerName},
@@ -182,12 +196,14 @@ export async function saveRunResult(input: RunResultInput) {
       ${input.error ?? null},
       ${jsonOrNull(input.requestPayload)}::jsonb,
       ${jsonOrNull(input.responsePayload)}::jsonb,
+      false,
       ${runStartedAt},
       ${completedAt},
       now()
     )
     on conflict (run_id) do update set
       status = excluded.status,
+      record_key = excluded.record_key,
       provider_id = excluded.provider_id,
       provider_name = excluded.provider_name,
       service_provider = excluded.service_provider,
@@ -219,6 +235,7 @@ export async function saveRunResult(input: RunResultInput) {
       error = excluded.error,
       request_payload = excluded.request_payload,
       response_payload = excluded.response_payload,
+      suppressed = excluded.suppressed,
       run_started_at = excluded.run_started_at,
       completed_at = excluded.completed_at,
       updated_at = now()
@@ -235,6 +252,7 @@ export async function getRunResults(limit = 1000) {
     select
       id,
       run_id,
+      record_key,
       status,
       provider_id,
       provider_name,
@@ -267,6 +285,7 @@ export async function getRunResults(limit = 1000) {
       error,
       request_payload,
       response_payload,
+      suppressed,
       run_started_at,
       completed_at,
       created_at,
@@ -313,6 +332,7 @@ function rowToRunResult(row: any) {
   return {
     id: Number(row.id),
     runId: row.run_id,
+    recordKey: row.record_key,
     status: row.status,
     providerId: row.provider_id,
     providerName: row.provider_name,
