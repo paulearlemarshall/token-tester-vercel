@@ -18,7 +18,7 @@ https://token-tester-web.vercel.app
 - Queue prompt, file, folder, single-file, and batch-file tests across many providers and models.
 - Preserve completed queue rows when adding more models.
 - Skip unsupported file/provider combinations without retrying fake placeholder content.
-- Run text, image, PDF, DOCX, and batch-file workloads where provider adapters support them.
+- Run text, image, PDF, DOCX, audio, video, and batch-file workloads where provider adapters support them.
 - Track local token estimates, provider token usage, latency, output text, errors, and estimated cost.
 - Persist every completed run to Neon with checksums, timestamps, provider metadata, payloads, and pricing context.
 - Slice archived observations by provider, model, status, source, file, prompt, checksum, suppression state, and date.
@@ -111,7 +111,7 @@ It supports:
 - Folder-style batches where browser file metadata is available.
 - Text extraction for supported text-like files.
 - Base64 capture for binary files.
-- Image, PDF, DOCX, text, and mixed batch inputs.
+- Image, PDF, DOCX, audio, video, text, and mixed batch inputs.
 
 The browser computes deterministic input identity before archiving so repeat observations can be grouped later.
 
@@ -240,6 +240,7 @@ Examples:
 - xAI runs use `/v1/responses`, upload PDFs/documents to `/v1/files`, and reference them as `input_file`.
 - Anthropic runs use `/v1/messages`, `anthropic-version`, `system`, and `messages`.
 - Gemini runs use `generateContent`, `contents`, and `generationConfig.maxOutputTokens`.
+- Gemini can send image, document, audio, and video attachments through `inlineData`.
 - OpenAI-compatible runs use `/v1/chat/completions`, `messages`, and either `max_tokens` or `max_completion_tokens` for reasoning-style models.
 - OpenRouter is treated as PDF-capable through its universal PDF path, while image support is model-dependent.
 - DeepSeek-routed models are treated as text-only.
@@ -253,6 +254,8 @@ Attachment kinds:
 - `text`: embedded into the prompt with filename delimiters or provider text blocks.
 - `image`: sent as provider-supported image content.
 - `document`: sent only when the provider adapter supports documents.
+- `audio`: sent only when the provider adapter supports audio.
+- `video`: sent only when the provider adapter supports video.
 
 Provider behavior:
 
@@ -261,6 +264,7 @@ Provider behavior:
 - xAI images use `input_image`.
 - Anthropic images/documents use base64 source blocks.
 - Gemini binary files use `inlineData`.
+- Gemini audio and video files use `inlineData` with the browser-provided MIME type.
 - DeepSeek and DeepSeek-routed models skip non-text attachments.
 - Generic OpenAI-compatible providers are conservative unless the app has explicit rules.
 

@@ -1,7 +1,7 @@
 import type { AttachedFile, TestRun } from '../types'
 import { providerCanAcceptAttachment, requiresTextOnlyAttachments } from './provider-capabilities'
 
-export type NormalizedAttachmentKind = 'text' | 'image' | 'document'
+export type NormalizedAttachmentKind = 'text' | 'image' | 'document' | 'audio' | 'video'
 
 export interface NormalizedAttachment {
   kind: NormalizedAttachmentKind
@@ -27,6 +27,8 @@ export interface ProviderRef {
 function attachmentKind(file: AttachedFile): NormalizedAttachmentKind {
   if (file.type === 'image') return 'image'
   if (file.type === 'document') return 'document'
+  if (file.type === 'audio') return 'audio'
+  if (file.type === 'video') return 'video'
   return 'text'
 }
 
@@ -60,7 +62,10 @@ export function unsupportedAttachmentReason(provider: ProviderRef, run: TestRun)
   const unsupported = filesForRun(run).filter(file => {
     if (file.type === 'text') return false
     if (requiresTextOnlyAttachments(provider, run.model)) return true
-    return !providerCanAcceptAttachment(provider, run.model, file.type === 'image' ? 'image' : 'document')
+    const attachmentType = file.type === 'image' || file.type === 'audio' || file.type === 'video'
+      ? file.type
+      : 'document'
+    return !providerCanAcceptAttachment(provider, run.model, attachmentType)
   })
   if (unsupported.length === 0) return null
   const names = unsupported.slice(0, 3).map(file => file.name).join(', ')
@@ -73,4 +78,3 @@ function defaultUserMessage(run: TestRun, files: AttachedFile[]) {
   if (files.length === 1) return `Analyze this file: ${files[0].name}`
   return `Analyze the following ${files.length} files:`
 }
-

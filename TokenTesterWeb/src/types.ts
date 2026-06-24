@@ -46,7 +46,7 @@ export interface AttachedFile {
   path: string
   size: number
   ext: string
-  type: 'text' | 'image' | 'document' | 'unknown'
+  type: 'text' | 'image' | 'document' | 'audio' | 'video' | 'unknown'
   content?: string
   base64?: string
   mimeType?: string

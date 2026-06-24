@@ -478,7 +478,7 @@ function buildGeminiParts(input: NormalizedRunInput): any[] {
   if (input.systemPrompt) parts.push({ text: input.systemPrompt })
   parts.push({ text: textWithAttachmentLabels(input) })
   for (const attachment of input.attachments) {
-    if ((attachment.kind === 'image' || attachment.kind === 'document') && attachment.base64 && attachment.mimeType) {
+    if ((attachment.kind === 'image' || attachment.kind === 'document' || attachment.kind === 'audio' || attachment.kind === 'video') && attachment.base64 && attachment.mimeType) {
       parts.push({ inlineData: { mimeType: attachment.mimeType, data: attachment.base64 } })
     }
   }

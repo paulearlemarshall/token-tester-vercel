@@ -20,11 +20,13 @@ export function requiresTextOnlyAttachments(provider: ProviderLike, model?: stri
   return getAttachmentCapabilities(provider, model).requiresTextOnlyAttachments
 }
 
-export function providerCanAcceptAttachment(provider: ProviderLike, model: string, attachmentType: 'image' | 'document' | 'text') {
+export function providerCanAcceptAttachment(provider: ProviderLike, model: string, attachmentType: 'image' | 'document' | 'audio' | 'video' | 'text') {
   const capabilities = getAttachmentCapabilities(provider, model)
   if (attachmentType === 'text') return true
   if (capabilities.requiresTextOnlyAttachments) return false
   if (attachmentType === 'image') return capabilities.supportsImages
   if (attachmentType === 'document') return capabilities.supportsDocuments
+  if (attachmentType === 'audio') return capabilities.supportsAudio
+  if (attachmentType === 'video') return capabilities.supportsVideo
   return false
 }

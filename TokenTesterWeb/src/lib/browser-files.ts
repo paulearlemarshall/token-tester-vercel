@@ -1,6 +1,8 @@
 import type { AttachedFile } from '../types'
 
 const IMAGE_EXTS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp'])
+const AUDIO_EXTS = new Set(['.mp3', '.wav', '.m4a', '.aac', '.flac', '.ogg', '.oga', '.opus', '.wma', '.aiff'])
+const VIDEO_EXTS = new Set(['.mp4', '.mov', '.m4v', '.avi', '.mkv', '.webm', '.mpeg', '.mpg', '.wmv', '.flv'])
 const TEXT_EXTS = new Set([
   '.txt', '.md', '.json', '.csv', '.yaml', '.yml', '.xml', '.html', '.css',
   '.js', '.ts', '.jsx', '.tsx', '.py', '.rb', '.java', '.c', '.cpp', '.h', '.hpp',
@@ -15,9 +17,29 @@ const MIME_MAP: Record<string, string> = {
   '.gif': 'image/gif',
   '.webp': 'image/webp',
   '.bmp': 'image/bmp',
+  '.mp3': 'audio/mpeg',
+  '.wav': 'audio/wav',
+  '.m4a': 'audio/mp4',
+  '.aac': 'audio/aac',
+  '.flac': 'audio/flac',
+  '.ogg': 'audio/ogg',
+  '.oga': 'audio/ogg',
+  '.opus': 'audio/ogg',
+  '.wma': 'audio/x-ms-wma',
+  '.aiff': 'audio/aiff',
+  '.mp4': 'video/mp4',
+  '.mov': 'video/quicktime',
+  '.m4v': 'video/x-m4v',
+  '.avi': 'video/x-msvideo',
+  '.mkv': 'video/x-matroska',
+  '.webm': 'video/webm',
+  '.mpeg': 'video/mpeg',
+  '.mpg': 'video/mpeg',
+  '.wmv': 'video/x-ms-wmv',
+  '.flv': 'video/x-flv',
 }
 
-const SUPPORTED_EXTS = new Set([...TEXT_EXTS, ...IMAGE_EXTS, '.pdf', '.docx'])
+const SUPPORTED_EXTS = new Set([...TEXT_EXTS, ...IMAGE_EXTS, ...AUDIO_EXTS, ...VIDEO_EXTS, '.pdf', '.docx'])
 
 export function isSupportedUpload(file: File) {
   return SUPPORTED_EXTS.has(extensionOf(file.name))
@@ -50,6 +72,22 @@ export async function fileToAttached(file: File, pathOverride?: string): Promise
     } catch {
       entry.content = `[Unable to read ${ext} file]`
     }
+    return entry
+  }
+
+  if (AUDIO_EXTS.has(ext)) {
+    entry.type = 'audio'
+    entry.base64 = await readBase64(file)
+    entry.mimeType = file.type || MIME_MAP[ext] || 'audio/mpeg'
+    entry.content = `[Audio file: ${file.name} - ${(file.size / 1024).toFixed(1)} KB - binary content sent inline when supported]`
+    return entry
+  }
+
+  if (VIDEO_EXTS.has(ext)) {
+    entry.type = 'video'
+    entry.base64 = await readBase64(file)
+    entry.mimeType = file.type || MIME_MAP[ext] || 'video/mp4'
+    entry.content = `[Video file: ${file.name} - ${(file.size / 1024).toFixed(1)} KB - binary content sent inline when supported]`
     return entry
   }
 

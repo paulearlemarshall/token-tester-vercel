@@ -174,7 +174,7 @@ function providerHandlingDetails(provider: any, selectedModels: string[]) {
         return [
           'Body: { contents: [{ role: "user", parts }], generationConfig: { maxOutputTokens: 4096 } }',
           'System prompt is inserted as a text part before the user message.',
-          'Images and documents use inlineData with mimeType and base64 data.',
+          'Images, documents, audio, and video use inlineData with mimeType and base64 data.',
         ]
       default:
         return [
@@ -196,6 +196,12 @@ function providerHandlingDetails(provider: any, selectedModels: string[]) {
     caps.supportsDocuments && !caps.requiresTextOnlyAttachments
       ? 'Document attachments are sent to the provider adapter.'
       : 'Document attachments are skipped for this provider/model capability.',
+    caps.supportsAudio && !caps.requiresTextOnlyAttachments
+      ? 'Audio attachments are sent to the provider adapter.'
+      : 'Audio attachments are skipped for this provider/model capability.',
+    caps.supportsVideo && !caps.requiresTextOnlyAttachments
+      ? 'Video attachments are sent to the provider adapter.'
+      : 'Video attachments are skipped for this provider/model capability.',
   ]
 
   if (adapter.id === 'openrouter') {

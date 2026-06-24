@@ -1,6 +1,6 @@
 import { useRef, useState } from 'react'
 import type { DragEvent } from 'react'
-import { Paperclip, FolderOpen, X, Eye, EyeOff, FileIcon, ImageIcon, FileTextIcon, Plus, ToggleLeft, ToggleRight, MessageSquare, FolderIcon, CheckSquare, Square, UploadCloud } from 'lucide-react'
+import { Paperclip, FolderOpen, X, Eye, EyeOff, FileIcon, ImageIcon, FileTextIcon, FileAudio, FileVideo, Plus, ToggleLeft, ToggleRight, MessageSquare, FolderIcon, CheckSquare, Square, UploadCloud } from 'lucide-react'
 import { useStore } from '../store'
 import { formatFileSize, truncate } from '../utils/formatters'
 import type { AttachedFile, FileItem } from '../types'
@@ -161,6 +161,8 @@ export function PromptsTab() {
   function iconForType(t: string) {
     switch (t) {
       case 'image': return <ImageIcon size={16} className="text-brand-gold" />
+      case 'audio': return <FileAudio size={16} className="text-brand-blue dark:text-brand-gold" />
+      case 'video': return <FileVideo size={16} className="text-brand-blue dark:text-brand-gold" />
       case 'text': return <FileTextIcon size={16} className="text-brand-blue dark:text-brand-gold" />
       default: return <FileIcon size={16} className="text-surface-400" />
     }
