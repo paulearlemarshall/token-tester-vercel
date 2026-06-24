@@ -4,6 +4,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
   {
     name: 'OpenAI',
     type: 'openai-compat',
+    adapterId: 'openai',
     baseUrl: 'https://api.openai.com',
     apiKeyEnv: 'OPENAI_API_KEY',
     models: ['gpt-4o', 'gpt-4o-mini', 'gpt-4-turbo', 'gpt-3.5-turbo'],
@@ -11,6 +12,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
   {
     name: 'OpenRouter',
     type: 'openai-compat',
+    adapterId: 'openrouter',
     baseUrl: 'https://openrouter.ai/api',
     apiKeyEnv: 'OPENROUTER_API_KEY',
     models: ['openai/gpt-4o', 'anthropic/claude-sonnet-4', 'google/gemini-2.0-flash', 'meta-llama/llama-3.1-70b-instruct'],
@@ -18,6 +20,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
   {
     name: 'SS&C AI Gateway',
     type: 'openai-compat',
+    adapterId: 'ssnc-ai-gateway',
     baseUrl: 'https://gov-ai-us.ssnc-corp.cloud',
     apiKeyEnv: 'SSC_CLOUD_API_KEY',
     models: ['meta-llama/Llama-3.3-70B-Instruct'],
@@ -26,6 +29,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
   {
     name: 'Anthropic',
     type: 'anthropic',
+    adapterId: 'anthropic',
     baseUrl: 'https://api.anthropic.com',
     apiKeyEnv: 'ANTHROPIC_API_KEY',
     models: ['claude-sonnet-4', 'claude-3-haiku'],
@@ -33,6 +37,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
   {
     name: 'Google Gemini',
     type: 'gemini',
+    adapterId: 'gemini',
     baseUrl: 'https://generativelanguage.googleapis.com',
     apiKeyEnv: 'GEMINI_API_KEY',
     models: ['gemini-2.0-flash', 'gemini-1.5-pro'],
@@ -40,6 +45,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
   {
     name: 'DeepSeek',
     type: 'openai-compat',
+    adapterId: 'deepseek',
     baseUrl: 'https://api.deepseek.com',
     apiKeyEnv: 'DEEPSEEK_API_KEY',
     models: ['deepseek-chat', 'deepseek-reasoner'],
@@ -47,6 +53,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
   {
     name: 'Mistral',
     type: 'openai-compat',
+    adapterId: 'mistral',
     baseUrl: 'https://api.mistral.ai',
     apiKeyEnv: 'MISTRAL_API_KEY',
     models: ['mistral-large-latest', 'mistral-small-latest'],
@@ -54,6 +61,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
   {
     name: 'xAI',
     type: 'openai-compat',
+    adapterId: 'xai',
     baseUrl: 'https://api.x.ai',
     apiKeyEnv: 'XAI_API_KEY',
     models: ['grok-4.3', 'grok-build-0.1'],

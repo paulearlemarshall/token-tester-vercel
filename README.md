@@ -16,6 +16,7 @@ https://token-tester-web.vercel.app
 - Stores pricing in Neon Postgres with manual, seeded, and provider-discovered overrides.
 - Skips unsupported attachments instead of forcing placeholder retries.
 - Surfaces raw pricing records, precedence, and evidence in a navigator UI.
+- Uses provider adapters so the browser sends normalized runs while the server builds provider-specific wire payloads.
 
 ## Core Workflow
 
@@ -29,6 +30,8 @@ vercel deploy --prod --yes
 
 ## Key Notes
 
+- The deployable Next.js app lives in `TokenTesterWeb`; Vercel Git builds must use `TokenTesterWeb` as the project Root Directory.
+- Provider behavior is selected by adapter ID, not only by the broad `openai-compat`, `anthropic`, or `gemini` protocol type.
 - Gemini pricing is canonicalized under `google/*`.
 - Manual model price edits and provider-discovered prices persist to Neon.
 - DeepSeek and DeepSeek-routed models are treated as text-only.

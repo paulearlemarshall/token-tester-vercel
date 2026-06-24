@@ -4,74 +4,8 @@ import { useStore } from '../store'
 import type { AttachedFile, DebugEntry, FileItem, TestRun } from '../types'
 import { formatDuration, truncate } from '../utils/formatters'
 import { webApi } from '../lib/web-api'
-import { canonicalProviderKey, pricingLookupKeys, type ProviderKeyInput } from '../lib/provider-key'
-import { providerCanAcceptAttachment, requiresTextOnlyAttachments, supportsDocumentAttachments, supportsImageAttachments } from '../lib/provider-capabilities'
-
-function buildMessages(systemPrompt: string, userMessage: string, provider: { name: string; type: string; baseUrl: string }, file: AttachedFile | null): any[] {
-  const messages: any[] = []
-  if (systemPrompt) messages.push({ role: 'system', content: systemPrompt })
-  if (!file) {
-    messages.push({ role: 'user', content: userMessage || 'Hello' })
-    return messages
-  }
-  const content: any[] = [{ type: 'text', text: userMessage || `Analyze this file: ${file.name}` }]
-  if (file.type === 'image' && supportsImageAttachments(provider)) {
-    content.push({ type: 'image_url', image_url: { url: `data:${file.mimeType};base64,${file.base64}` } })
-  } else if (file.type === 'document' && provider.type === 'openai-compat' && supportsDocumentAttachments(provider)) {
-    content.push({ type: 'file', file: { filename: file.name, file_data: `data:${file.mimeType};base64,${file.base64}` } })
-  } else if (file.type === 'document' && supportsDocumentAttachments(provider)) {
-    content.push({ type: 'image_url', image_url: { url: `data:${file.mimeType};base64,${file.base64}` } })
-  } else if (file.content) {
-    content.push({ type: 'text', text: `\n\n\`\`\`\n${file.content}\n\`\`\`` })
-  }
-  messages.push({ role: 'user', content })
-  return messages
-}
-
-function buildBatchMessages(systemPrompt: string, userMessage: string, provider: { name: string; type: string; baseUrl: string }, files: AttachedFile[]): any[] {
-  const messages: any[] = []
-  if (systemPrompt) messages.push({ role: 'system', content: systemPrompt })
-
-  const parts: any[] = [{ type: 'text', text: userMessage || `Analyze the following ${files.length} files:` }]
-  for (const f of files) {
-    if (f.type === 'image') {
-      parts.push({ type: 'text', text: `\n--- ${f.name} ---` })
-      parts.push({ type: 'image_url', image_url: { url: `data:${f.mimeType};base64,${f.base64}` } })
-    } else if (f.type === 'document') {
-      parts.push({ type: 'text', text: `\n--- ${f.name} ---` })
-      if (provider.type === 'openai-compat' && supportsDocumentAttachments(provider)) {
-        parts.push({ type: 'file', file: { filename: f.name, file_data: `data:${f.mimeType};base64,${f.base64}` } })
-      } else {
-        parts.push({ type: 'image_url', image_url: { url: `data:${f.mimeType};base64,${f.base64}` } })
-      }
-    } else if (f.content) {
-      parts.push({ type: 'text', text: `\n--- ${f.name} ---\n\`\`\`\n${f.content}\n\`\`\`` })
-    }
-  }
-  messages.push({ role: 'user', content: parts })
-  return messages
-}
-
-function needsCompletionTokens(model: string): boolean {
-  return /^o\d/i.test(model) || /^gpt-5/i.test(model) || model.toLowerCase().includes('reasoning')
-}
-
-function buildRequestBody(providerType: string, model: string, messages: any[], maxTokens: number): any {
-  const body: any = { model, messages, max_tokens: maxTokens }
-  if (providerType === 'openai-compat' && needsCompletionTokens(model)) {
-    delete body.max_tokens
-    body.max_completion_tokens = maxTokens
-  }
-  return body
-}
-
-function retryWithCompletionTokens(body: any, maxTokens: number): any {
-  if (!body.max_tokens) return body
-  const retry = { ...body }
-  delete retry.max_tokens
-  retry.max_completion_tokens = maxTokens
-  return retry
-}
+import { canonicalProviderKey, effectivePricing as resolveEffectivePricing, pricingLookupKeys, type ProviderKeyInput } from '../lib/provider-key'
+import { buildRunInput, unsupportedAttachmentReason } from '../lib/run-input'
 
 function modelLozenges(providerName: string, modelId: string, meta: any, pricing: { input: number; output: number }) {
   const id = modelId.toLowerCase()
@@ -106,21 +40,6 @@ function lozengeClass(tone: 'blue' | 'gold' | 'slate' | 'green') {
     default:
       return 'border-surface-600 bg-surface-800 text-surface-400'
   }
-}
-
-function unsupportedAttachmentReason(provider: { name: string; type: string; baseUrl: string }, run: TestRun) {
-  const files = run.sourceType === 'batch'
-    ? (run.batchFiles ?? [])
-    : (run.file ? [run.file] : [])
-  const unsupported = files.filter(file => {
-    if (file.type === 'text') return false
-    if (requiresTextOnlyAttachments(provider, run.model)) return true
-    return !providerCanAcceptAttachment(provider, run.model, file.type === 'image' ? 'image' : 'document')
-  })
-  if (unsupported.length === 0) return null
-  const names = unsupported.slice(0, 3).map(file => file.name).join(', ')
-  const suffix = unsupported.length > 3 ? `, and ${unsupported.length - 3} more` : ''
-  return `${provider.name} does not support this attachment type for ${run.model}; skipped unsupported attachment${unsupported.length !== 1 ? 's' : ''}: ${names}${suffix}`
 }
 
 export function RunTab() {
@@ -218,24 +137,7 @@ export function RunTab() {
   }
 
   function effectivePricing(provider: ProviderKeyInput | string, modelId: string): { input: number; output: number } {
-    const providerModelKeys = pricingLookupKeys(provider, modelId)
-    for (const key of providerModelKeys) {
-      const override = modelPricing[key]
-      if (override && (override.input > 0 || override.output > 0)) return override
-    }
-    for (const key of providerModelKeys) {
-      if (builtinPricing[key]) return { input: builtinPricing[key].input, output: builtinPricing[key].output }
-    }
-    if (builtinPricing[modelId]) return { input: builtinPricing[modelId].input, output: builtinPricing[modelId].output }
-    const short = modelId.includes('/') ? modelId.split('/').pop()! : modelId
-    if (short !== modelId && builtinPricing[short]) return { input: builtinPricing[short].input, output: builtinPricing[short].output }
-    const keys = Object.keys(builtinPricing).sort((a, b) => b.length - a.length)
-    for (const key of keys) {
-      if (providerModelKeys.some(providerModelKey => providerModelKey.startsWith(key))) return { input: builtinPricing[key].input, output: builtinPricing[key].output }
-      if (modelId.startsWith(key)) return { input: builtinPricing[key].input, output: builtinPricing[key].output }
-      if (modelId.endsWith(`/${key}`)) return { input: builtinPricing[key].input, output: builtinPricing[key].output }
-    }
-    return { input: 0, output: 0 }
+    return resolveEffectivePricing(provider, modelId, modelPricing, builtinPricing)
   }
 
   function generateQueue() {
@@ -333,27 +235,21 @@ export function RunTab() {
     }
 
     try {
-      const messages = run.sourceType === 'batch' && run.batchFiles
-        ? buildBatchMessages(run.systemPrompt, run.userMessage, prov, run.batchFiles)
-        : buildMessages(run.systemPrompt, run.userMessage, prov, run.file)
-      let bodyPayload = buildRequestBody(prov.type, run.model, messages, 4096)
+      const input = buildRunInput(run)
 
       let result = await webApi.chatCompletion({
-        provider: { type: prov.type, baseUrl: prov.baseUrl, apiKeyEnv: prov.apiKeyEnv, headers: prov.headers },
+        provider: { type: prov.type, adapterId: prov.adapterId, baseUrl: prov.baseUrl, apiKeyEnv: prov.apiKeyEnv, headers: prov.headers },
         model: run.model,
-        messages,
+        input,
         maxTokens: 4096,
-        requestBody: bodyPayload,
       })
 
       if (result.error && /max_tokens.*max_completion_tokens/i.test(result.error)) {
-        bodyPayload = retryWithCompletionTokens(bodyPayload, 4096)
         result = await webApi.chatCompletion({
-          provider: { type: prov.type, baseUrl: prov.baseUrl, apiKeyEnv: prov.apiKeyEnv, headers: prov.headers },
+          provider: { type: prov.type, adapterId: prov.adapterId, baseUrl: prov.baseUrl, apiKeyEnv: prov.apiKeyEnv, headers: prov.headers },
           model: run.model,
-          messages,
+          input,
           maxTokens: 4096,
-          requestBody: bodyPayload,
         })
       }
 
@@ -377,7 +273,7 @@ export function RunTab() {
       const debug: DebugEntry = {
         provider: prov.name,
         model: run.model,
-        request: bodyPayload,
+        request: result.requestPayload ?? input,
         response: result,
         error: result.error,
         file: run.file?.name || (run.batchFiles ? `batch (${run.batchFiles.length})` : ''),
@@ -390,7 +286,11 @@ export function RunTab() {
 
       let localTokens = 0
       try {
-        const fullText = messages.map((m: any) => typeof m.content === 'string' ? m.content : JSON.stringify(m.content)).join(' ')
+        const fullText = [
+          input.systemPrompt,
+          input.userMessage,
+          ...input.attachments.map(file => file.text || file.filename),
+        ].join(' ')
         localTokens = await webApi.countTokens(fullText)
       } catch { /* ignore */ }
 

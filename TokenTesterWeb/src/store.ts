@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import type { AppConfig, AttachedFile, DebugEntry, FileItem, PromptEntry, ProviderConfig, TabId, TestRun, ThemeMode } from './types'
 import { PROVIDER_PRESETS } from './utils/constants'
+import { inferProviderAdapterId } from './lib/provider-registry'
 
 function loadJSON<T>(key: string, fallback: T): T {
   try {
@@ -43,11 +44,14 @@ function migratePricingKeys(data: Record<string, any>): Record<string, any> {
 
 function migrateConfig(data: AppConfig): AppConfig {
   const providers = data.providers.map((provider) => {
-    if (provider.name !== 'Groq' && provider.apiKeyEnv !== 'GROQ_API_KEY') return provider
+    if (provider.name !== 'Groq' && provider.apiKeyEnv !== 'GROQ_API_KEY') {
+      return { ...provider, adapterId: provider.adapterId ?? inferProviderAdapterId(provider) }
+    }
     return {
       ...provider,
       name: 'xAI',
       type: 'openai-compat' as const,
+      adapterId: 'xai' as const,
       baseUrl: 'https://api.x.ai',
       apiKeyEnv: 'XAI_API_KEY',
       models: provider.models.length > 0 && provider.name !== 'Groq'
@@ -127,6 +131,7 @@ export const useStore = create<AppState>((set, get) => ({
       id: crypto.randomUUID(),
       name: preset.name,
       type: preset.type,
+      adapterId: preset.adapterId,
       baseUrl: preset.baseUrl,
       apiKeyEnv: preset.apiKeyEnv,
       models: [...preset.models],

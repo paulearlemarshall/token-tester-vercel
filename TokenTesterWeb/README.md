@@ -36,14 +36,17 @@ https://token-tester-web.vercel.app
 - `src/components/TokenTesterApp.tsx`: top-level tabbed interface.
 - `src/components/ConfigureTab.tsx`: provider setup, model discovery, fetched pricing import, and the Pricing navigator entry point.
 - `src/components/PromptsTab.tsx`: prompt and file input management.
-- `src/components/RunTab.tsx`: model selection, queue creation, unsupported attachment skips, retry actions, and per-model price edits.
+- `src/components/RunTab.tsx`: model selection, queue creation, unsupported attachment skips, retry actions, and per-model price edits. It builds normalized run inputs rather than provider wire payloads.
 - `src/components/ResultsTab.tsx`: run results, summaries, charts, and exports.
 - `src/components/PricingNavigator.tsx`: provider/model price browser with source records, evidence, and sorting.
 - `src/components/layout/Sidebar.tsx`: primary navigation.
-- `src/lib/provider-api.ts`: server-side provider model discovery and chat completion adapters.
+- `src/lib/provider-api.ts`: server-side provider model discovery and provider wire adapters.
 - `src/lib/pricing.ts`: Neon pricing read/write logic.
-- `src/lib/provider-key.ts`: canonical provider identity and pricing lookup helpers.
-- `src/lib/provider-capabilities.ts`: attachment capability and provider-specific file policy helpers.
+- `src/lib/provider-registry.ts`: adapter IDs, provider inference, canonical provider identity, and attachment capabilities.
+- `src/lib/run-input.ts`: normalized prompt/file input builder and unsupported attachment checks.
+- `src/lib/pricing-match.ts`: canonical provider keys, pricing lookup keys, and effective price fallback logic.
+- `src/lib/provider-key.ts`: compatibility re-export for pricing key helpers.
+- `src/lib/provider-capabilities.ts`: compatibility re-export for attachment capability helpers.
 - `src/lib/db.ts`: Neon SQL client.
 - `src/lib/web-api.ts`: browser-side wrappers for app API routes.
 - `src/lib/browser-files.ts`: browser file parsing helpers.
@@ -78,7 +81,46 @@ Built-in presets are defined in `src/utils/constants.ts`.
 - Mistral: `MISTRAL_API_KEY`, OpenAI-compatible.
 - xAI: `XAI_API_KEY`, OpenAI-compatible at `https://api.x.ai`.
 
-Saved browser configs that still reference the old Groq preset are migrated in `src/store.ts` to xAI with `XAI_API_KEY`.
+Each provider has an `adapterId` in addition to its broad protocol type. The protocol type says which family the provider broadly resembles; the adapter ID drives concrete behavior:
+
+- `openai`
+- `openrouter`
+- `xai`
+- `anthropic`
+- `gemini`
+- `deepseek`
+- `mistral`
+- `ssnc-ai-gateway`
+- `custom-openai-compatible`
+
+Saved browser configs are migrated in `src/store.ts` so older providers receive an inferred adapter ID. Saved configs that still reference the old Groq preset are migrated to xAI with `XAI_API_KEY`.
+
+## Run Request Architecture
+
+The browser builds a normalized run input and sends it to `POST /api/chat`. Provider wire formats are built server-side only.
+
+Normalized run input contains:
+
+- `systemPrompt`
+- `userMessage`
+- `attachments`
+
+Each attachment contains:
+
+- `kind`: `text`, `image`, or `document`
+- `filename`
+- `mimeType`
+- `base64` for binary uploads
+- `text` for text uploads
+
+The server-side adapter then serializes that neutral input:
+
+- OpenAI, OpenRouter, DeepSeek, Mistral, SS&C, and custom OpenAI-compatible providers use `/v1/chat/completions`.
+- xAI uses `/v1/responses`; document attachments are uploaded to `/v1/files` first and referenced as `input_file`.
+- Anthropic uses `/v1/messages`.
+- Gemini uses `generateContent`.
+
+Debug output records the provider wire request returned by the server adapter when available, so the Run tab can inspect the actual payload sent to the provider.
 
 ## Model Discovery
 
@@ -96,11 +138,11 @@ When the provider returns machine-readable pricing, the UI persists that pricing
 
 ## File and Document Handling
 
-Uploads are parsed in `src/lib/browser-files.ts` and queued in `src/components/RunTab.tsx`.
+Uploads are parsed in `src/lib/browser-files.ts`, normalized in `src/lib/run-input.ts`, and serialized by provider adapters in `src/lib/provider-api.ts`.
 
-- Text files are sent as text message parts.
-- Images are sent as image parts when the provider capability helper says the provider supports them.
-- PDFs and DOCX files are classified as `document` attachments and are only sent to providers that the app explicitly treats as document-capable.
+- Text files become `text` attachments.
+- Images become `image` attachments when the provider adapter says the provider supports them.
+- PDFs and DOCX files become `document` attachments and are only sent to providers that the app explicitly treats as document-capable.
 - OpenRouter is treated as document-capable because it exposes a universal PDF handler and can parse PDFs even when the downstream model does not natively accept file input.
 - xAI / Grok requests are routed through xAI `/v1/responses` for both text and document runs, because the legacy chat-completions path is text/image only.
 - Unsupported attachments are marked `skipped` before inference. Skipped runs record zero input tokens, zero output tokens, zero latency, and zero cost.
@@ -253,11 +295,11 @@ Supported JSON shapes:
 - Nested map: `{ "openrouter": { "openai/gpt-4o": { "input": 2.5, "output": 10, "per": "1M" } } }`.
 - `llm-prices` current API shape: `{ "updated_at": "2026-06-09", "prices": [{ "vendor": "openai", "id": "gpt-4o", "name": "GPT-4o", "input": 2.5, "output": 10, "input_cached": 1.25 }] }`.
 
-Current matching rules to keep in mind:
+Current matching rules:
 
 - Pricing lookup always prefers a canonical provider key first, then a legacy provider-name alias if present.
 - Gemini provider names and the Gemini provider type map to `google` for pricing and navigator records.
-- The Run tab still uses provider-specific adapters for message formatting, but attachment support is now defined in `src/lib/provider-capabilities.ts` instead of being hard-coded inline in one place.
+- `src/lib/pricing-match.ts` is the shared place for canonical keys, lookup key generation, and effective price fallback logic.
 
 ## Verification
 
@@ -290,6 +332,16 @@ node -e "fetch('https://token-tester-web.vercel.app/api/pricing').then(r=>consol
 ```
 
 ## Vercel Deployment
+
+The Vercel project must use `TokenTesterWeb` as its Root Directory. Git-triggered builds fail from the repo root because the Next.js `src/app` directory lives under `TokenTesterWeb`.
+
+In the Vercel dashboard, configure:
+
+- Project: `token-tester-web`
+- Root Directory: `TokenTesterWeb`
+- Framework Preset: Next.js
+- Build Command: default or `npm run build`
+- Output Directory: default
 
 Production deploy:
 

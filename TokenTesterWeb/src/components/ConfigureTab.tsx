@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { Plus, Trash2, ToggleLeft, ToggleRight, ChevronDown, ChevronUp, RefreshCw, Loader2, FileEdit, DollarSign, X, Copy, Check } from 'lucide-react'
 import { useStore } from '../store'
 import { PROVIDER_PRESETS, PROVIDER_LOGOS } from '../utils/constants'
-import type { ProviderConfig, ProviderType } from '../types'
+import type { ProviderAdapterId, ProviderConfig, ProviderType } from '../types'
 import { webApi } from '../lib/web-api'
 import { PricingNavigator } from './PricingNavigator'
 import { canonicalProviderKey } from '../lib/provider-key'
@@ -83,6 +83,7 @@ export function ConfigureTab() {
       id: crypto.randomUUID(),
       name: 'Custom',
       type: 'openai-compat',
+      adapterId: 'custom-openai-compatible',
       baseUrl: 'https://api.openai.com',
       apiKeyEnv: 'CUSTOM_API_KEY',
       models: ['gpt-4o'],
@@ -227,6 +228,24 @@ export function ConfigureTab() {
                     </select>
                   </div>
                   <div className="col-span-2">
+                    <label className="label">Adapter</label>
+                    <select
+                      className="input"
+                      value={prov.adapterId ?? 'custom-openai-compatible'}
+                      onChange={e => updateProvider(prov.id, { adapterId: e.target.value as ProviderAdapterId })}
+                    >
+                      <option value="openai">OpenAI</option>
+                      <option value="openrouter">OpenRouter</option>
+                      <option value="xai">xAI</option>
+                      <option value="anthropic">Anthropic</option>
+                      <option value="gemini">Google Gemini</option>
+                      <option value="deepseek">DeepSeek</option>
+                      <option value="mistral">Mistral</option>
+                      <option value="ssnc-ai-gateway">SS&C AI Gateway</option>
+                      <option value="custom-openai-compatible">Custom OpenAI-compatible</option>
+                    </select>
+                  </div>
+                  <div className="col-span-2">
                     <label className="label">Base URL</label>
                     <input
                       className="input font-mono text-xs"
@@ -261,6 +280,7 @@ export function ConfigureTab() {
                           try {
                             const result = await webApi.fetchModels({
                               type: prov.type,
+                              adapterId: prov.adapterId,
                               baseUrl: prov.baseUrl,
                               apiKeyEnv: prov.apiKeyEnv,
                               headers: prov.headers,

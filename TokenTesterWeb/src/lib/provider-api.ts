@@ -1,4 +1,6 @@
-import type { ProviderType } from '../types'
+import type { ProviderAdapterId, ProviderType } from '../types'
+import type { NormalizedAttachment, NormalizedRunInput } from './run-input'
+import { getProviderAdapter } from './provider-registry'
 
 function parseHeaders(raw?: string): Record<string, string> {
   if (!raw) return {}
@@ -15,6 +17,7 @@ function parseHeaders(raw?: string): Record<string, string> {
 
 export interface ModelFetchParams {
   type: ProviderType
+  adapterId?: ProviderAdapterId
   baseUrl: string
   apiKeyEnv: string
   headers?: string
@@ -23,23 +26,20 @@ export interface ModelFetchParams {
 export interface ChatParams {
   provider: {
     type: ProviderType
+    adapterId?: ProviderAdapterId
     baseUrl: string
     apiKeyEnv: string
     headers?: string
   }
   model: string
-  messages: unknown[]
+  input?: NormalizedRunInput
+  messages?: unknown[]
   maxTokens?: number
-  requestBody?: unknown
 }
 
 function centsPer100mToUsdPer1m(value: unknown) {
   if (typeof value !== 'number' || !Number.isFinite(value)) return undefined
   return value / 10_000
-}
-
-function isXaiBaseUrl(baseUrl: string) {
-  return baseUrl.trim().toLowerCase().includes('api.x.ai')
 }
 
 export async function fetchProviderModels(params: ModelFetchParams) {
@@ -136,10 +136,13 @@ interface ApiResult {
   totalTokens: number
   responseText: string
   error?: string
+  requestPayload?: unknown
+  requestUrl?: string
 }
 
 export async function chatCompletion(params: ChatParams) {
-  const { provider, model, messages, maxTokens = 4096 } = params
+  const { provider, model, maxTokens = 4096 } = params
+  const input = params.input ?? legacyMessagesToRunInput(params.messages ?? [])
   const apiKey = process.env[provider.apiKeyEnv] || ''
   if (!apiKey) {
     return {
@@ -156,23 +159,28 @@ export async function chatCompletion(params: ChatParams) {
 
   try {
     let result: ApiResult
+    const adapter = getProviderAdapter(provider)
 
-    switch (provider.type) {
-      case 'openai-compat':
-        if (isXaiBaseUrl(provider.baseUrl)) {
-          result = await chatXaiResponses(provider.baseUrl, apiKey, model, messages, maxTokens, provider.headers)
-        } else {
-          result = await chatOpenAICompat(provider.baseUrl, apiKey, model, messages, maxTokens, provider.headers, params.requestBody)
-        }
+    switch (adapter.id) {
+      case 'xai':
+        result = await chatXaiResponses(provider.baseUrl, apiKey, model, input, maxTokens, provider.headers)
         break
       case 'anthropic':
-        result = await chatAnthropic(apiKey, model, messages, maxTokens)
+        result = await chatAnthropic(apiKey, model, input, maxTokens)
         break
       case 'gemini':
-        result = await chatGemini(apiKey, model, messages, maxTokens)
+        result = await chatGemini(apiKey, model, input, maxTokens)
+        break
+      case 'openai':
+      case 'openrouter':
+      case 'deepseek':
+      case 'mistral':
+      case 'ssnc-ai-gateway':
+      case 'custom-openai-compatible':
+        result = await chatOpenAICompat(provider.baseUrl, apiKey, model, input, maxTokens, provider.headers)
         break
       default:
-        throw new Error(`Unknown provider type: ${provider.type}`)
+        throw new Error(`Unknown provider adapter: ${adapter.id}`)
     }
 
     const latencyMs = Math.round(performance.now() - start)
@@ -187,6 +195,65 @@ export async function chatCompletion(params: ChatParams) {
       error: err.message ?? String(err),
     }
   }
+}
+
+function legacyMessagesToRunInput(messages: unknown[]): NormalizedRunInput {
+  const systemPrompt = (messages as any[]).find((m: any) => m?.role === 'system')?.content ?? ''
+  const user = (messages as any[]).find((m: any) => m?.role !== 'system')
+  const content = user?.content
+  if (typeof content === 'string') {
+    return { systemPrompt: String(systemPrompt), userMessage: content, attachments: [] }
+  }
+  if (!Array.isArray(content)) {
+    return { systemPrompt: String(systemPrompt), userMessage: 'Hello', attachments: [] }
+  }
+  const textParts = content.filter((part: any) => part?.type === 'text').map((part: any) => part.text).filter(Boolean)
+  const attachments: NormalizedAttachment[] = content.flatMap((part: any) => {
+    if (part?.type === 'image_url' && typeof part.image_url?.url === 'string') {
+      const match = part.image_url.url.match(/^data:(.+?);base64,(.+)$/)
+      if (!match) return []
+      const mimeType = match[1]
+      return [{ kind: mimeType.startsWith('application/') ? 'document' : 'image', filename: 'attachment', mimeType, base64: match[2] }]
+    }
+    if (part?.type === 'file' && typeof part.file?.file_data === 'string') {
+      const match = part.file.file_data.match(/^data:(.+?);base64,(.+)$/)
+      if (!match) return []
+      return [{ kind: 'document', filename: part.file.filename ?? 'attachment', mimeType: match[1], base64: match[2] }]
+    }
+    return []
+  })
+  return { systemPrompt: String(systemPrompt), userMessage: textParts.join('\n') || 'Hello', attachments }
+}
+
+function textWithAttachmentLabels(input: NormalizedRunInput) {
+  const labels = input.attachments
+    .filter(attachment => attachment.kind !== 'text')
+    .map(attachment => `\n--- ${attachment.filename} ---`)
+    .join('')
+  const textAttachments = input.attachments
+    .filter(attachment => attachment.kind === 'text' && attachment.text)
+    .map(attachment => `\n--- ${attachment.filename} ---\n\`\`\`\n${attachment.text}\n\`\`\``)
+    .join('')
+  return `${input.userMessage || 'Hello'}${labels}${textAttachments}`
+}
+
+function needsCompletionTokens(model: string): boolean {
+  return /^o\d/i.test(model) || /^gpt-5/i.test(model) || model.toLowerCase().includes('reasoning')
+}
+
+function buildOpenAICompatMessages(input: NormalizedRunInput) {
+  const messages: any[] = []
+  if (input.systemPrompt) messages.push({ role: 'system', content: input.systemPrompt })
+  const content: any[] = [{ type: 'text', text: textWithAttachmentLabels(input) }]
+  for (const attachment of input.attachments) {
+    if (attachment.kind === 'image' && attachment.base64 && attachment.mimeType) {
+      content.push({ type: 'image_url', image_url: { url: `data:${attachment.mimeType};base64,${attachment.base64}` } })
+    } else if (attachment.kind === 'document' && attachment.base64 && attachment.mimeType) {
+      content.push({ type: 'file', file: { filename: attachment.filename, file_data: `data:${attachment.mimeType};base64,${attachment.base64}` } })
+    }
+  }
+  messages.push({ role: 'user', content })
+  return messages
 }
 
 function parseXaiResponseText(data: any): string {
@@ -230,63 +297,32 @@ async function uploadXaiFile(
 }
 
 async function buildXaiResponsesInput(
-  messages: unknown[],
+  inputRun: NormalizedRunInput,
   baseUrl: string,
   apiKey: string,
   extraHeaders?: string
 ): Promise<any[]> {
   const fileIdCache = new Map<string, Promise<string>>()
   const input: any[] = []
+  if (inputRun.systemPrompt) input.push({ role: 'system', content: inputRun.systemPrompt })
 
-  for (const message of messages as any[]) {
-    const role = message?.role === 'assistant' ? 'assistant' : message?.role === 'system' ? 'system' : 'user'
-    const content = message?.content
-    if (typeof content === 'string') {
-      input.push({ role, content })
-      continue
+  const parts: any[] = [{ type: 'input_text', text: textWithAttachmentLabels(inputRun) }]
+  for (const attachment of inputRun.attachments) {
+    if (attachment.kind === 'document') {
+      if (!attachment.base64 || !attachment.mimeType) throw new Error('xAI document attachments must include base64 data and mime type')
+      const cacheKey = `${attachment.filename}:${attachment.mimeType}:${attachment.base64.length}:${attachment.base64.slice(0, 32)}`
+      let uploadPromise = fileIdCache.get(cacheKey)
+      if (!uploadPromise) {
+        uploadPromise = uploadXaiFile(baseUrl, apiKey, attachment.filename, attachment.mimeType, attachment.base64, extraHeaders)
+        fileIdCache.set(cacheKey, uploadPromise)
+      }
+      const fileId = await uploadPromise
+      parts.push({ type: 'input_file', file_id: fileId })
+    } else if (attachment.kind === 'image' && attachment.base64 && attachment.mimeType) {
+      parts.push({ type: 'input_image', image_url: `data:${attachment.mimeType};base64,${attachment.base64}` })
     }
-
-    if (!Array.isArray(content)) {
-      input.push({ role, content: String(content ?? '') })
-      continue
-    }
-
-    const parts: any[] = []
-    for (const part of content) {
-      if (part?.type === 'text' && typeof part.text === 'string') {
-        parts.push({ type: 'input_text', text: part.text })
-        continue
-      }
-
-      if (part?.type === 'file' && typeof part.file?.file_data === 'string') {
-        const match = part.file.file_data.match(/^data:(.+?);base64,(.+)$/)
-        if (!match) throw new Error('xAI file attachments must be base64 data URLs')
-        const mimeType = match[1]
-        const base64Data = match[2]
-        const filename = part.file.filename || 'attachment'
-        const cacheKey = `${filename}:${mimeType}:${base64Data.length}:${base64Data.slice(0, 32)}`
-        let uploadPromise = fileIdCache.get(cacheKey)
-        if (!uploadPromise) {
-          uploadPromise = uploadXaiFile(baseUrl, apiKey, filename, mimeType, base64Data, extraHeaders)
-          fileIdCache.set(cacheKey, uploadPromise)
-        }
-        const fileId = await uploadPromise
-        parts.push({ type: 'input_file', file_id: fileId })
-        continue
-      }
-
-      if (part?.type === 'image_url' && typeof part.image_url?.url === 'string') {
-        parts.push({ type: 'input_image', image_url: part.image_url.url })
-        continue
-      }
-
-      if (part?.text) {
-        parts.push({ type: 'input_text', text: String(part.text) })
-      }
-    }
-
-    input.push(parts.length > 0 ? { role, content: parts } : { role, content: '' })
   }
+  input.push({ role: 'user', content: parts })
 
   return input
 }
@@ -295,18 +331,19 @@ async function chatXaiResponses(
   baseUrl: string,
   apiKey: string,
   model: string,
-  messages: unknown[],
+  inputRun: NormalizedRunInput,
   maxTokens: number,
   extraHeaders?: string
 ): Promise<ApiResult> {
   const url = `${baseUrl.replace(/\/+$/, '')}/v1/responses`
-  const input = await buildXaiResponsesInput(messages, baseUrl, apiKey, extraHeaders)
+  const input = await buildXaiResponsesInput(inputRun, baseUrl, apiKey, extraHeaders)
   const extra = parseHeaders(extraHeaders)
+  const body = { model, input, max_output_tokens: maxTokens }
 
   const res = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}`, ...extra },
-    body: JSON.stringify({ model, input, max_output_tokens: maxTokens }),
+    body: JSON.stringify(body),
   })
 
   if (!res.ok) {
@@ -321,6 +358,8 @@ async function chatXaiResponses(
     outputTokens,
     totalTokens,
     responseText: parseXaiResponseText(data),
+    requestPayload: body,
+    requestUrl: url,
   }
 }
 
@@ -328,14 +367,17 @@ async function chatOpenAICompat(
   baseUrl: string,
   apiKey: string,
   model: string,
-  messages: unknown[],
+  input: NormalizedRunInput,
   maxTokens: number,
-  extraHeaders?: string,
-  requestBody?: unknown
+  extraHeaders?: string
 ): Promise<ApiResult> {
   const url = `${baseUrl.replace(/\/+$/, '')}/v1/chat/completions`
   const extra = parseHeaders(extraHeaders)
-  const body = requestBody ?? { model, messages, max_tokens: maxTokens }
+  const body: any = { model, messages: buildOpenAICompatMessages(input), max_tokens: maxTokens }
+  if (needsCompletionTokens(model)) {
+    delete body.max_tokens
+    body.max_completion_tokens = maxTokens
+  }
 
   const res = await fetch(url, {
     method: 'POST',
@@ -354,22 +396,18 @@ async function chatOpenAICompat(
     outputTokens: data.usage?.completion_tokens ?? 0,
     totalTokens: data.usage?.total_tokens ?? 0,
     responseText: data.choices?.[0]?.message?.content ?? '',
+    requestPayload: body,
+    requestUrl: url,
   }
 }
 
-async function chatAnthropic(apiKey: string, model: string, messages: any[], maxTokens: number): Promise<ApiResult> {
-  const systemMsg = messages.find((m: any) => m.role === 'system')
-  const otherMsgs = messages.filter((m: any) => m.role !== 'system')
-
+async function chatAnthropic(apiKey: string, model: string, input: NormalizedRunInput, maxTokens: number): Promise<ApiResult> {
   const body: any = {
     model,
-    messages: otherMsgs.map((m: any) => ({
-      role: m.role === 'assistant' ? 'assistant' : 'user',
-      content: buildAnthropicContent(m.content),
-    })),
+    messages: [{ role: 'user', content: buildAnthropicContent(input) }],
     max_tokens: maxTokens,
   }
-  if (systemMsg) body.system = buildAnthropicContent(systemMsg.content)
+  if (input.systemPrompt) body.system = input.systemPrompt
 
   const res = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
@@ -392,41 +430,31 @@ async function chatAnthropic(apiKey: string, model: string, messages: any[], max
     outputTokens: data.usage?.output_tokens ?? 0,
     totalTokens: (data.usage?.input_tokens ?? 0) + (data.usage?.output_tokens ?? 0),
     responseText: data.content?.[0]?.text ?? '',
+    requestPayload: body,
+    requestUrl: 'https://api.anthropic.com/v1/messages',
   }
 }
 
-function buildAnthropicContent(content: any): any {
-  if (typeof content === 'string') return content
-  if (Array.isArray(content)) {
-    return content.map((part: any) => {
-      if (part.type === 'image_url') {
-        const match = part.image_url.url.match(/^data:(.+?);base64,(.+)$/)
-        if (match) {
-          const isDoc = match[1].startsWith('application/')
-          return { type: isDoc ? 'document' : 'image', source: { type: 'base64', media_type: match[1], data: match[2] } }
-        }
-      }
-      return { type: 'text', text: part.text ?? '' }
-    })
+function buildAnthropicContent(input: NormalizedRunInput): any[] {
+  const parts: any[] = [{ type: 'text', text: textWithAttachmentLabels(input) }]
+  for (const attachment of input.attachments) {
+    if (attachment.kind === 'image' && attachment.base64 && attachment.mimeType) {
+      parts.push({ type: 'image', source: { type: 'base64', media_type: attachment.mimeType, data: attachment.base64 } })
+    } else if (attachment.kind === 'document' && attachment.base64 && attachment.mimeType) {
+      parts.push({ type: 'document', source: { type: 'base64', media_type: attachment.mimeType, data: attachment.base64 } })
+    }
   }
-  return String(content)
+  return parts
 }
 
-async function chatGemini(apiKey: string, model: string, messages: any[], maxTokens: number): Promise<ApiResult> {
+async function chatGemini(apiKey: string, model: string, input: NormalizedRunInput, maxTokens: number): Promise<ApiResult> {
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`
-  const contents: any[] = []
-  for (const msg of messages) {
-    if (msg.role === 'system') continue
-    contents.push({
-      role: msg.role === 'assistant' ? 'model' : 'user',
-      parts: buildGeminiParts(msg.content),
-    })
-  }
+  const body = { contents: [{ role: 'user', parts: buildGeminiParts(input) }], generationConfig: { maxOutputTokens: maxTokens } }
 
   const res = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ contents, generationConfig: { maxOutputTokens: maxTokens } }),
+    body: JSON.stringify(body),
   })
 
   if (!res.ok) {
@@ -440,19 +468,19 @@ async function chatGemini(apiKey: string, model: string, messages: any[], maxTok
     outputTokens: data.usageMetadata?.candidatesTokenCount ?? 0,
     totalTokens: data.usageMetadata?.totalTokenCount ?? 0,
     responseText: data.candidates?.[0]?.content?.parts?.[0]?.text ?? '',
+    requestPayload: body,
+    requestUrl: url,
   }
 }
 
-function buildGeminiParts(content: any): any[] {
-  if (typeof content === 'string') return [{ text: content }]
-  if (Array.isArray(content)) {
-    return content.map((part: any) => {
-      if (part.type === 'image_url') {
-        const match = part.image_url.url.match(/^data:(.+?);base64,(.+)$/)
-        if (match) return { inlineData: { mimeType: match[1], data: match[2] } }
-      }
-      return { text: part.text ?? '' }
-    })
+function buildGeminiParts(input: NormalizedRunInput): any[] {
+  const parts: any[] = []
+  if (input.systemPrompt) parts.push({ text: input.systemPrompt })
+  parts.push({ text: textWithAttachmentLabels(input) })
+  for (const attachment of input.attachments) {
+    if ((attachment.kind === 'image' || attachment.kind === 'document') && attachment.base64 && attachment.mimeType) {
+      parts.push({ inlineData: { mimeType: attachment.mimeType, data: attachment.base64 } })
+    }
   }
-  return [{ text: String(content) }]
+  return parts
 }

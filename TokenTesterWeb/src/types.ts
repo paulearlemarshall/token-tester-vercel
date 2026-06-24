@@ -1,5 +1,16 @@
 export type ProviderType = 'openai-compat' | 'anthropic' | 'gemini'
 
+export type ProviderAdapterId =
+  | 'openai'
+  | 'openrouter'
+  | 'xai'
+  | 'anthropic'
+  | 'gemini'
+  | 'deepseek'
+  | 'mistral'
+  | 'ssnc-ai-gateway'
+  | 'custom-openai-compatible'
+
 export interface ModelMeta {
   id: string
   created?: number
@@ -12,6 +23,7 @@ export interface ProviderConfig {
   id: string
   name: string
   type: ProviderType
+  adapterId?: ProviderAdapterId
   baseUrl: string
   apiKeyEnv: string
   models: string[]
@@ -60,6 +72,8 @@ export interface ChatResult {
   responseText: string
   latencyMs: number
   error?: string
+  requestPayload?: unknown
+  requestUrl?: string
 }
 
 export interface TestRun {
@@ -110,6 +124,7 @@ export interface AppConfig {
 export interface ProviderPreset {
   name: string
   type: ProviderType
+  adapterId?: ProviderAdapterId
   baseUrl: string
   apiKeyEnv: string
   models: string[]
