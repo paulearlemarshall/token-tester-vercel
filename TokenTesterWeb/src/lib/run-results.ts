@@ -80,17 +80,20 @@ async function ensureRunResultsSchema() {
       error text,
       request_payload jsonb,
       response_payload jsonb,
+      suppressed boolean not null default false,
       run_started_at timestamptz,
       completed_at timestamptz not null default now(),
       created_at timestamptz not null default now(),
       updated_at timestamptz not null default now()
     )
   `
+  await sql`alter table run_results add column if not exists suppressed boolean not null default false`
   await sql`create index if not exists run_results_completed_idx on run_results (completed_at desc)`
   await sql`create index if not exists run_results_provider_model_idx on run_results (service_provider, model, completed_at desc)`
   await sql`create index if not exists run_results_status_idx on run_results (status, completed_at desc)`
   await sql`create index if not exists run_results_input_hash_idx on run_results (input_hash)`
   await sql`create index if not exists run_results_file_hash_idx on run_results (file_hash)`
+  await sql`create index if not exists run_results_suppressed_idx on run_results (suppressed, completed_at desc)`
   schemaReady = true
 }
 
@@ -140,6 +143,7 @@ export async function saveRunResult(input: RunResultInput) {
       error,
       request_payload,
       response_payload,
+      suppressed,
       run_started_at,
       completed_at,
       updated_at
@@ -278,6 +282,33 @@ export async function getRunResults(limit = 1000) {
   }
 }
 
+export async function updateRunResultsSuppressed(ids: number[], suppressed: boolean) {
+  await ensureRunResultsSchema()
+  const normalizedIds = normalizeIds(ids)
+  if (normalizedIds.length === 0) return { updated: 0 }
+  const sql = getSql()
+  const rows = await sql`
+    update run_results
+    set suppressed = ${suppressed}, updated_at = now()
+    where id = any(${normalizedIds}::bigint[])
+    returning id
+  `
+  return { updated: (rows as any[]).length }
+}
+
+export async function deleteRunResults(ids: number[]) {
+  await ensureRunResultsSchema()
+  const normalizedIds = normalizeIds(ids)
+  if (normalizedIds.length === 0) return { deleted: 0 }
+  const sql = getSql()
+  const rows = await sql`
+    delete from run_results
+    where id = any(${normalizedIds}::bigint[])
+    returning id
+  `
+  return { deleted: (rows as any[]).length }
+}
+
 function rowToRunResult(row: any) {
   return {
     id: Number(row.id),
@@ -314,6 +345,7 @@ function rowToRunResult(row: any) {
     error: row.error,
     requestPayload: row.request_payload,
     responsePayload: row.response_payload,
+    suppressed: Boolean(row.suppressed),
     runStartedAt: row.run_started_at,
     completedAt: row.completed_at,
     createdAt: row.created_at,
@@ -323,4 +355,10 @@ function rowToRunResult(row: any) {
 
 function jsonOrNull(value: unknown) {
   return value == null ? null : JSON.stringify(value)
+}
+
+function normalizeIds(ids: number[]) {
+  return [...new Set((ids ?? [])
+    .map(id => Number(id))
+    .filter(id => Number.isSafeInteger(id) && id > 0))]
 }

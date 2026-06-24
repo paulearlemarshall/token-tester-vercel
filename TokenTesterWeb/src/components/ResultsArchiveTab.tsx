@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Archive, ArrowDown, ArrowUp, BarChart3, Database, RefreshCw, Search, Table2 } from 'lucide-react'
+import { Archive, ArrowDown, ArrowUp, BarChart3, Database, EyeOff, RefreshCw, RotateCcw, Search, Table2, Trash2 } from 'lucide-react'
 import {
   Bar, BarChart, CartesianGrid, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from 'recharts'
@@ -21,8 +21,11 @@ export function ResultsArchiveTab() {
   const [status, setStatus] = useState('')
   const [sourceType, setSourceType] = useState('')
   const [view, setView] = useState<'table' | 'charts'>('charts')
+  const [tableView, setTableView] = useState<'records' | 'file' | 'prompt'>('records')
+  const [visibility, setVisibility] = useState<'active' | 'all' | 'suppressed'>('active')
   const [sortField, setSortField] = useState<SortField>('completedAt')
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set())
 
   async function loadArchive() {
     setLoading(true)
@@ -62,6 +65,8 @@ export function ResultsArchiveTab() {
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase()
     return records.filter(record => {
+      if (visibility === 'active' && record.suppressed) return false
+      if (visibility === 'suppressed' && !record.suppressed) return false
       if (provider && record.providerName !== provider) return false
       if (model && record.model !== model) return false
       if (status && record.status !== status) return false
@@ -84,7 +89,7 @@ export function ResultsArchiveTab() {
       ].filter(Boolean).join(' ').toLowerCase()
       return haystack.includes(q)
     })
-  }, [records, query, provider, model, status, sourceType])
+  }, [records, query, provider, model, status, sourceType, visibility])
 
   const sorted = useMemo(() => {
     const sign = sortDir === 'asc' ? 1 : -1
@@ -106,26 +111,36 @@ export function ResultsArchiveTab() {
     })
   }, [filtered, sortField, sortDir])
 
+  const analysisRecords = useMemo(() => filtered.filter(record => !record.suppressed), [filtered])
+
   const summary = useMemo(() => {
-    const successes = filtered.filter(r => r.status === 'success')
-    const totalCost = filtered.reduce((sum, r) => sum + (r.estimatedCost ?? 0), 0)
+    const successes = analysisRecords.filter(r => r.status === 'success')
+    const totalCost = analysisRecords.reduce((sum, r) => sum + (r.estimatedCost ?? 0), 0)
     const avgLatency = successes.length
       ? successes.reduce((sum, r) => sum + r.latencyMs, 0) / successes.length
       : 0
     return {
-      runs: filtered.length,
+      runs: analysisRecords.length,
       successes: successes.length,
-      errors: filtered.filter(r => r.status === 'error').length,
-      skipped: filtered.filter(r => r.status === 'skipped').length,
-      tokens: filtered.reduce((sum, r) => sum + r.totalTokens, 0),
+      errors: analysisRecords.filter(r => r.status === 'error').length,
+      skipped: analysisRecords.filter(r => r.status === 'skipped').length,
+      tokens: analysisRecords.reduce((sum, r) => sum + r.totalTokens, 0),
       totalCost,
       avgLatency,
     }
-  }, [filtered])
+  }, [analysisRecords])
 
-  const byModel = useMemo(() => groupRecords(filtered, r => r.model).slice(0, 12), [filtered])
-  const byProvider = useMemo(() => groupRecords(filtered, r => r.providerName).slice(0, 12), [filtered])
-  const byStatus = useMemo(() => groupRecords(filtered, r => r.status), [filtered])
+  const byModel = useMemo(() => groupRecords(analysisRecords, r => r.model).slice(0, 12), [analysisRecords])
+  const byProvider = useMemo(() => groupRecords(analysisRecords, r => r.providerName).slice(0, 12), [analysisRecords])
+  const byStatus = useMemo(() => groupRecords(analysisRecords, r => r.status), [analysisRecords])
+  const groupedRows = useMemo(() => {
+    if (tableView === 'file') return groupRecords(sorted, record => record.fileName || '(no file)')
+    if (tableView === 'prompt') return groupRecords(sorted, record => promptPreview(record))
+    return []
+  }, [sorted, tableView])
+  const visibleIds = useMemo(() => sorted.map(record => record.id), [sorted])
+  const selectedCount = selectedIds.size
+  const allVisibleSelected = visibleIds.length > 0 && visibleIds.every(id => selectedIds.has(id))
 
   function toggleSort(field: SortField) {
     if (sortField === field) {
@@ -134,6 +149,44 @@ export function ResultsArchiveTab() {
       setSortField(field)
       setSortDir('asc')
     }
+  }
+
+  function toggleSelected(id: number) {
+    setSelectedIds(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id); else next.add(id)
+      return next
+    })
+  }
+
+  function toggleVisibleSelection() {
+    setSelectedIds(prev => {
+      const next = new Set(prev)
+      if (allVisibleSelected) {
+        visibleIds.forEach(id => next.delete(id))
+      } else {
+        visibleIds.forEach(id => next.add(id))
+      }
+      return next
+    })
+  }
+
+  async function setSuppressedForSelected(suppressed: boolean) {
+    const ids = Array.from(selectedIds)
+    if (ids.length === 0) return
+    await webApi.updateArchivedResultsSuppressed(ids, suppressed)
+    setRecords(current => current.map(record => ids.includes(record.id) ? { ...record, suppressed } : record))
+    setSelectedIds(new Set())
+  }
+
+  async function deleteSelected() {
+    const ids = Array.from(selectedIds)
+    if (ids.length === 0) return
+    const confirmed = window.confirm(`Delete ${ids.length} archived result${ids.length === 1 ? '' : 's'} permanently? This cannot be undone.`)
+    if (!confirmed) return
+    await webApi.deleteArchivedResults(ids)
+    setRecords(current => current.filter(record => !ids.includes(record.id)))
+    setSelectedIds(new Set())
   }
 
   function SortHeader({ field, children, className }: { field: SortField; children: React.ReactNode; className?: string }) {
@@ -186,6 +239,11 @@ export function ResultsArchiveTab() {
         <FilterSelect value={model} onChange={setModel} options={models} label="All models" />
         <FilterSelect value={status} onChange={setStatus} options={statuses} label="All statuses" />
         <FilterSelect value={sourceType} onChange={setSourceType} options={sourceTypes} label="All sources" />
+        <select value={visibility} onChange={e => setVisibility(e.target.value as typeof visibility)} className="input min-w-36">
+          <option value="active">Active only</option>
+          <option value="all">Active + suppressed</option>
+          <option value="suppressed">Suppressed only</option>
+        </select>
         <div className="ml-auto flex rounded-lg border border-surface-700 bg-surface-850 p-1">
           <button onClick={() => setView('charts')} className={`px-3 py-1.5 text-xs rounded-md flex items-center gap-1.5 ${view === 'charts' ? 'bg-brand-gold text-brand-charcoal' : 'text-surface-400 hover:text-surface-100'}`}>
             <BarChart3 size={14} /> Charts
@@ -195,6 +253,31 @@ export function ResultsArchiveTab() {
           </button>
         </div>
       </div>
+
+      {view === 'table' && (
+        <div className="flex flex-wrap items-center gap-2 rounded-lg border border-surface-700 bg-surface-900 p-3">
+          <div className="flex rounded-lg border border-surface-700 bg-surface-850 p-1">
+            <button onClick={() => setTableView('records')} className={`px-3 py-1.5 text-xs rounded-md ${tableView === 'records' ? 'bg-brand-gold text-brand-charcoal' : 'text-surface-400 hover:text-surface-100'}`}>Records</button>
+            <button onClick={() => setTableView('file')} className={`px-3 py-1.5 text-xs rounded-md ${tableView === 'file' ? 'bg-brand-gold text-brand-charcoal' : 'text-surface-400 hover:text-surface-100'}`}>By File</button>
+            <button onClick={() => setTableView('prompt')} className={`px-3 py-1.5 text-xs rounded-md ${tableView === 'prompt' ? 'bg-brand-gold text-brand-charcoal' : 'text-surface-400 hover:text-surface-100'}`}>By Prompt</button>
+          </div>
+          {tableView === 'records' && (
+            <>
+              <span className="text-xs text-surface-400">{selectedCount} selected</span>
+              <button onClick={() => setSuppressedForSelected(true)} disabled={selectedCount === 0} className="btn-secondary flex items-center gap-1.5 text-xs">
+                <EyeOff size={14} /> Suppress
+              </button>
+              <button onClick={() => setSuppressedForSelected(false)} disabled={selectedCount === 0} className="btn-secondary flex items-center gap-1.5 text-xs">
+                <RotateCcw size={14} /> Restore
+              </button>
+              <button onClick={deleteSelected} disabled={selectedCount === 0} className="btn-danger flex items-center gap-1.5 text-xs">
+                <Trash2 size={14} /> Delete
+              </button>
+            </>
+          )}
+          <span className="ml-auto text-xs text-surface-500">Suppressed records stay in the archive but are excluded from stats and charts.</span>
+        </div>
+      )}
 
       {error && <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-200">{error}</div>}
 
@@ -209,36 +292,64 @@ export function ResultsArchiveTab() {
         <div className="min-h-0 flex-1 overflow-auto rounded-lg border border-surface-700">
           <table className="w-full text-sm">
             <thead className="sticky top-0 bg-surface-900 border-b border-surface-700">
-              <tr>
-                <SortHeader field="completedAt">Completed</SortHeader>
-                <SortHeader field="providerName">Provider</SortHeader>
-                <SortHeader field="model">Model</SortHeader>
-                <SortHeader field="status">Status</SortHeader>
-                <SortHeader field="sourceType">Source</SortHeader>
-                <SortHeader field="fileName">File</SortHeader>
-                <th className="px-4 py-2 text-left text-xs font-medium text-surface-400">Input Hash</th>
-                <SortHeader field="inputTokens" className="text-right">In</SortHeader>
-                <SortHeader field="outputTokens" className="text-right">Out</SortHeader>
-                <SortHeader field="latencyMs" className="text-right">Latency</SortHeader>
-                <SortHeader field="estimatedCost" className="text-right">Cost</SortHeader>
-              </tr>
+              {tableView === 'records' ? (
+                <tr>
+                  <th className="px-4 py-2 text-left">
+                    <input type="checkbox" checked={allVisibleSelected} onChange={toggleVisibleSelection} aria-label="Select visible archive records" />
+                  </th>
+                  <SortHeader field="completedAt">Completed</SortHeader>
+                  <SortHeader field="providerName">Provider</SortHeader>
+                  <SortHeader field="model">Model</SortHeader>
+                  <SortHeader field="status">Status</SortHeader>
+                  <SortHeader field="sourceType">Source</SortHeader>
+                  <SortHeader field="fileName">File</SortHeader>
+                  <th className="px-4 py-2 text-left text-xs font-medium text-surface-400">Prompt</th>
+                  <th className="px-4 py-2 text-left text-xs font-medium text-surface-400">Input Hash</th>
+                  <SortHeader field="inputTokens" className="text-right">In</SortHeader>
+                  <SortHeader field="outputTokens" className="text-right">Out</SortHeader>
+                  <SortHeader field="latencyMs" className="text-right">Latency</SortHeader>
+                  <SortHeader field="estimatedCost" className="text-right">Cost</SortHeader>
+                  <th className="px-4 py-2 text-left text-xs font-medium text-surface-400">Flags</th>
+                </tr>
+              ) : (
+                <tr>
+                  <th className="px-4 py-2 text-left text-xs font-medium text-surface-400">{tableView === 'file' ? 'File' : 'Prompt'}</th>
+                  <th className="px-4 py-2 text-right text-xs font-medium text-surface-400">Runs</th>
+                  <th className="px-4 py-2 text-right text-xs font-medium text-surface-400">Tokens</th>
+                  <th className="px-4 py-2 text-right text-xs font-medium text-surface-400">Avg Latency</th>
+                  <th className="px-4 py-2 text-right text-xs font-medium text-surface-400">Cost</th>
+                </tr>
+              )}
             </thead>
             <tbody>
-              {sorted.map(record => (
-                <tr key={record.id} className="border-b border-surface-800 hover:bg-surface-850">
-                  <td className="px-4 py-2 text-xs text-surface-400 whitespace-nowrap">{new Date(record.completedAt).toLocaleString()}</td>
-                  <td className="px-4 py-2 text-surface-200">{record.providerName}</td>
-                  <td className="px-4 py-2 font-mono text-xs text-surface-200">{record.model}</td>
-                  <td className="px-4 py-2"><StatusBadge status={record.status} /></td>
-                  <td className="px-4 py-2 text-surface-300">{record.sourceType}</td>
-                  <td className="px-4 py-2 text-surface-300" title={record.filePath ?? undefined}>{record.fileName ?? '—'}</td>
-                  <td className="px-4 py-2 font-mono text-[11px] text-surface-500" title={record.inputHash}>{record.inputHash.slice(0, 12)}</td>
-                  <td className="px-4 py-2 text-right font-mono text-xs">{formatNumber(record.inputTokens)}</td>
-                  <td className="px-4 py-2 text-right font-mono text-xs">{formatNumber(record.outputTokens)}</td>
-                  <td className="px-4 py-2 text-right font-mono text-xs">{formatDuration(record.latencyMs)}</td>
-                  <td className="px-4 py-2 text-right font-mono text-xs">{formatCurrency(record.estimatedCost ?? 0)}</td>
-                </tr>
-              ))}
+              {tableView === 'records' ? sorted.map(record => (
+                  <tr key={record.id} className={`border-b border-surface-800 hover:bg-surface-850 ${record.suppressed ? 'opacity-60' : ''}`}>
+                    <td className="px-4 py-2">
+                      <input type="checkbox" checked={selectedIds.has(record.id)} onChange={() => toggleSelected(record.id)} aria-label={`Select archive record ${record.id}`} />
+                    </td>
+                    <td className="px-4 py-2 text-xs text-surface-400 whitespace-nowrap">{new Date(record.completedAt).toLocaleString()}</td>
+                    <td className="px-4 py-2 text-surface-200">{record.providerName}</td>
+                    <td className="px-4 py-2 font-mono text-xs text-surface-200">{record.model}</td>
+                    <td className="px-4 py-2"><StatusBadge status={record.status} /></td>
+                    <td className="px-4 py-2 text-surface-300">{record.sourceType}</td>
+                    <td className="px-4 py-2 text-surface-300" title={record.filePath ?? undefined}>{record.fileName ?? '—'}</td>
+                    <td className="px-4 py-2 text-surface-300" title={record.userMessage ?? undefined}>{promptPreview(record)}</td>
+                    <td className="px-4 py-2 font-mono text-[11px] text-surface-500" title={record.inputHash}>{record.inputHash.slice(0, 12)}</td>
+                    <td className="px-4 py-2 text-right font-mono text-xs">{formatNumber(record.inputTokens)}</td>
+                    <td className="px-4 py-2 text-right font-mono text-xs">{formatNumber(record.outputTokens)}</td>
+                    <td className="px-4 py-2 text-right font-mono text-xs">{formatDuration(record.latencyMs)}</td>
+                    <td className="px-4 py-2 text-right font-mono text-xs">{formatCurrency(record.estimatedCost ?? 0)}</td>
+                    <td className="px-4 py-2">{record.suppressed ? <span className="rounded border border-surface-500/30 bg-surface-700 px-2 py-0.5 text-xs text-surface-300">suppressed</span> : '—'}</td>
+                  </tr>
+                )) : groupedRows.map(row => (
+                  <tr key={row.name} className="border-b border-surface-800 hover:bg-surface-850">
+                    <td className="px-4 py-2 text-surface-200">{row.name}</td>
+                    <td className="px-4 py-2 text-right font-mono text-xs">{formatNumber(row.runs)}</td>
+                    <td className="px-4 py-2 text-right font-mono text-xs">{formatNumber(row.tokens)}</td>
+                    <td className="px-4 py-2 text-right font-mono text-xs">{formatDuration(row.avgLatency)}</td>
+                    <td className="px-4 py-2 text-right font-mono text-xs">{formatCurrency(row.cost)}</td>
+                  </tr>
+                ))}
             </tbody>
           </table>
           {sorted.length === 0 && (
@@ -295,6 +406,13 @@ function ChartPanel({ title, data, metric }: { title: string; data: any[]; metri
       </ResponsiveContainer>
     </div>
   )
+}
+
+function promptPreview(record: ArchivedRunResult) {
+  const text = (record.userMessage || record.sourceLabel || '').replace(/\s+/g, ' ').trim()
+  if (!text) return '(empty prompt)'
+  const words = text.split(' ').slice(0, 8).join(' ')
+  return words.length < text.length ? `${words}...` : words
 }
 
 function groupRecords(records: ArchivedRunResult[], keyFn: (record: ArchivedRunResult) => string) {

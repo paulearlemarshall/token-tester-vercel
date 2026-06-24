@@ -157,7 +157,7 @@ The archived record also stores:
 - Response text, error text, provider request payload, and response payload.
 - Run start and completion timestamps.
 
-`GET /api/results` returns recent archived records for the Results Archive tab. The route lazily creates the archive table if it is missing, so a deployed app can begin archiving before `npm run db:setup` has been run manually.
+`GET /api/results` returns recent archived records for the Results Archive tab. The route lazily creates the archive table if it is missing, so a deployed app can begin archiving before `npm run db:setup` has been run manually. `PATCH /api/results` bulk suppresses or restores archive records, and `DELETE /api/results` permanently deletes selected archive records.
 
 ## Results Archive
 
@@ -167,7 +167,11 @@ It supports:
 
 - Free-text smart filtering across provider, model, source, file name/path, hashes, output text, and errors.
 - Facet filters for provider, model, status, and source type.
+- Active/all/suppressed visibility filters.
 - Sortable result rows for completion time, provider, model, status, source, file, token counts, latency, and estimated cost.
+- Multi-select row actions for suppress, restore, and confirmed permanent delete.
+- Suppression keeps the record but excludes it from summary metrics and charts.
+- Grouped table views by file name or by the first few words of the prompt.
 - Summary metrics for run count, success/error/skipped count, tokens, cost, and average latency.
 - Charts for cost by model, average latency by model, tokens by provider, and runs by status.
 
@@ -274,6 +278,7 @@ run_results (
   error text,
   request_payload jsonb,
   response_payload jsonb,
+  suppressed boolean not null default false,
   run_started_at timestamptz,
   completed_at timestamptz,
   created_at timestamptz,
@@ -288,6 +293,8 @@ Prices are stored as USD per 1 million tokens.
 - `PUT /api/pricing` upserts one model price into Neon.
 - `GET /api/results` returns archived run records.
 - `POST /api/results` upserts a completed run archive row.
+- `PATCH /api/results` sets `suppressed` for selected archive rows.
+- `DELETE /api/results` permanently removes selected archive rows.
 
 Source priority is:
 

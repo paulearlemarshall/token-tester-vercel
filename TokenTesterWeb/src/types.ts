@@ -158,6 +158,7 @@ export interface ArchivedRunResult {
   error?: string | null
   requestPayload?: unknown
   responsePayload?: unknown
+  suppressed: boolean
   runStartedAt?: string | null
   completedAt: string
   createdAt: string

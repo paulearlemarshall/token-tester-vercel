@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { getRunResults, saveRunResult } from '@/lib/run-results'
+import { deleteRunResults, getRunResults, saveRunResult, updateRunResultsSuppressed } from '@/lib/run-results'
 
 export const dynamic = 'force-dynamic'
 
@@ -17,6 +17,24 @@ export async function POST(request: Request) {
   try {
     const input = await request.json()
     return NextResponse.json(await saveRunResult(input))
+  } catch (err: any) {
+    return NextResponse.json({ error: err.message ?? String(err) }, { status: 400 })
+  }
+}
+
+export async function PATCH(request: Request) {
+  try {
+    const input = await request.json()
+    return NextResponse.json(await updateRunResultsSuppressed(input.ids ?? [], Boolean(input.suppressed)))
+  } catch (err: any) {
+    return NextResponse.json({ error: err.message ?? String(err) }, { status: 400 })
+  }
+}
+
+export async function DELETE(request: Request) {
+  try {
+    const input = await request.json()
+    return NextResponse.json(await deleteRunResults(input.ids ?? []))
   } catch (err: any) {
     return NextResponse.json({ error: err.message ?? String(err) }, { status: 400 })
   }

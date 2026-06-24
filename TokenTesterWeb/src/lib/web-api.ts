@@ -45,6 +45,14 @@ export const webApi = {
     return sendJson<any>('/api/results', params)
   },
 
+  updateArchivedResultsSuppressed(ids: number[], suppressed: boolean) {
+    return sendJson<any>('/api/results', { ids, suppressed }, 'PATCH')
+  },
+
+  deleteArchivedResults(ids: number[]) {
+    return sendJson<any>('/api/results', { ids }, 'DELETE')
+  },
+
   async savePricing(params: {
     serviceProvider: string
     modelId: string

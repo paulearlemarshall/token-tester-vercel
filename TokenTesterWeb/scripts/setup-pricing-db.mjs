@@ -98,6 +98,7 @@ await sql`
     error text,
     request_payload jsonb,
     response_payload jsonb,
+    suppressed boolean not null default false,
     run_started_at timestamptz,
     completed_at timestamptz not null default now(),
     created_at timestamptz not null default now(),
@@ -105,11 +106,14 @@ await sql`
   )
 `
 
+await sql`alter table run_results add column if not exists suppressed boolean not null default false`
+
 await sql`create index if not exists run_results_completed_idx on run_results (completed_at desc)`
 await sql`create index if not exists run_results_provider_model_idx on run_results (service_provider, model, completed_at desc)`
 await sql`create index if not exists run_results_status_idx on run_results (status, completed_at desc)`
 await sql`create index if not exists run_results_input_hash_idx on run_results (input_hash)`
 await sql`create index if not exists run_results_file_hash_idx on run_results (file_hash)`
+await sql`create index if not exists run_results_suppressed_idx on run_results (suppressed, completed_at desc)`
 
 console.log('model_prices and run_results schema is ready')
 
