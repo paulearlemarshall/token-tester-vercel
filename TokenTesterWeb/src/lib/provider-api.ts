@@ -370,7 +370,7 @@ function hasAudioAttachments(input: NormalizedRunInput) {
 function buildOpenAIMessages(input: NormalizedRunInput) {
   const messages: any[] = []
   if (input.systemPrompt) messages.push({ role: 'system', content: input.systemPrompt })
-  const content: any[] = [{ type: 'text', text: textWithAttachmentLabels(input) }]
+  const content: any[] = [{ type: 'text', text: input.userMessage || 'Hello' }]
   for (const attachment of input.attachments) {
     if (attachment.kind === 'image' && attachment.base64 && attachment.mimeType) {
       content.push({ type: 'image_url', image_url: { url: `data:${attachment.mimeType};base64,${attachment.base64}` } })
@@ -816,6 +816,7 @@ function extractOpenAICompatText(data: any) {
   const message = choice?.message ?? choice?.delta ?? choice
   const candidates = [
     message?.content,
+    message?.audio?.transcript,
     message?.text,
     message?.reasoning,
     message?.refusal,
