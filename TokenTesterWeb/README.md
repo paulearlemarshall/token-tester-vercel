@@ -166,7 +166,7 @@ The Results Archive tab is the persistent reporting surface for historical runs.
 It supports:
 
 - Free-text smart filtering across provider, model, source, file name/path, hashes, output text, and errors.
-- Facet filters for provider, model, status, and source type.
+- Facet filters for provider, model, status, source type, and recorded file name.
 - Active/all/suppressed visibility filters.
 - Sortable result rows for completion time, provider, model, status, source, file, token counts, latency, and estimated cost.
 - Multi-select row actions for suppress, restore, and confirmed permanent delete.

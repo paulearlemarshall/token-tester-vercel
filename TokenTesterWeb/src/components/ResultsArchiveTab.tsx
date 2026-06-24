@@ -20,6 +20,7 @@ export function ResultsArchiveTab() {
   const [model, setModel] = useState('')
   const [status, setStatus] = useState('')
   const [sourceType, setSourceType] = useState('')
+  const [fileName, setFileName] = useState('')
   const [view, setView] = useState<'table' | 'charts'>('charts')
   const [tableView, setTableView] = useState<'records' | 'file' | 'prompt'>('records')
   const [visibility, setVisibility] = useState<'active' | 'all' | 'suppressed'>('active')
@@ -61,6 +62,7 @@ export function ResultsArchiveTab() {
   const models = useMemo(() => [...new Set(records.map(r => r.model).filter(Boolean))].sort(), [records])
   const statuses = useMemo(() => [...new Set(records.map(r => r.status).filter(Boolean))].sort(), [records])
   const sourceTypes = useMemo(() => [...new Set(records.map(r => r.sourceType).filter(Boolean))].sort(), [records])
+  const fileNames = useMemo(() => [...new Set(records.map(r => r.fileName || '(no file)'))].sort(), [records])
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase()
@@ -71,6 +73,7 @@ export function ResultsArchiveTab() {
       if (model && record.model !== model) return false
       if (status && record.status !== status) return false
       if (sourceType && record.sourceType !== sourceType) return false
+      if (fileName && (record.fileName || '(no file)') !== fileName) return false
       if (!q) return true
       const haystack = [
         record.providerName,
@@ -89,7 +92,7 @@ export function ResultsArchiveTab() {
       ].filter(Boolean).join(' ').toLowerCase()
       return haystack.includes(q)
     })
-  }, [records, query, provider, model, status, sourceType, visibility])
+  }, [records, query, provider, model, status, sourceType, fileName, visibility])
 
   const sorted = useMemo(() => {
     const sign = sortDir === 'asc' ? 1 : -1
@@ -239,6 +242,7 @@ export function ResultsArchiveTab() {
         <FilterSelect value={model} onChange={setModel} options={models} label="All models" />
         <FilterSelect value={status} onChange={setStatus} options={statuses} label="All statuses" />
         <FilterSelect value={sourceType} onChange={setSourceType} options={sourceTypes} label="All sources" />
+        <FilterSelect value={fileName} onChange={setFileName} options={fileNames} label="All files" />
         <select value={visibility} onChange={e => setVisibility(e.target.value as typeof visibility)} className="input min-w-36">
           <option value="active">Active only</option>
           <option value="all">Active + suppressed</option>
