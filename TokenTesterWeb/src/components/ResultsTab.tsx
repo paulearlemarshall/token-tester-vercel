@@ -13,6 +13,27 @@ type SortField = 'provider' | 'model' | 'inRate' | 'outRate' | 'input' | 'output
 
 const CHART_COLORS = ['#6366f1', '#8b5cf6', '#ec4899', '#f59e0b', '#10b981', '#06b6d4', '#f97316', '#ef4444', '#14b8a6', '#a855f7']
 
+function lookupBuiltin(model: string, pricing: Record<string, PriceEntry | null>): PriceEntry | null {
+  if (pricing[model]) return pricing[model]
+  const short = model.includes('/') ? model.split('/').pop()! : model
+  if (short !== model && pricing[short]) return pricing[short]
+  const keys = Object.keys(pricing).sort((a, b) => b.length - a.length)
+  for (const key of keys) {
+    if (model.startsWith(key)) return pricing[key]
+    if (model.endsWith(`/${key}`)) return pricing[key]
+  }
+  return null
+}
+
+function getRate(run: { priceOverride?: { input: number; output: number }; providerName: string; model: string }, pricing: Record<string, PriceEntry | null>): { input: number; output: number; per: string } | null {
+  if (run.priceOverride && (run.priceOverride.input > 0 || run.priceOverride.output > 0)) {
+    return { input: run.priceOverride.input, output: run.priceOverride.output, per: '1M' }
+  }
+  const key = `${canonicalProviderKey(run.providerName)}/${run.model}`
+  if (pricing[key]) return pricing[key]
+  return lookupBuiltin(run.model, pricing)
+}
+
 export function ResultsTab() {
   const { queue, builtinPricing } = useStore()
   const [view, setView] = useState<'table' | 'charts'>('table')
@@ -25,29 +46,8 @@ export function ResultsTab() {
   const completed = results.filter(r => r.status === 'success')
   const skipped = results.filter(r => r.status === 'skipped')
 
-  function lookupBuiltin(model: string): PriceEntry | null {
-    if (builtinPricing[model]) return builtinPricing[model]
-    const short = model.includes('/') ? model.split('/').pop()! : model
-    if (short !== model && builtinPricing[short]) return builtinPricing[short]
-    const keys = Object.keys(builtinPricing).sort((a, b) => b.length - a.length)
-    for (const key of keys) {
-      if (model.startsWith(key)) return builtinPricing[key]
-      if (model.endsWith(`/${key}`)) return builtinPricing[key]
-    }
-    return null
-  }
-
   const totalInputTokens = completed.reduce((s, r) => s + (r.result?.inputTokens ?? 0), 0)
   const totalOutputTokens = completed.reduce((s, r) => s + (r.result?.outputTokens ?? 0), 0)
-
-  function getRate(run: typeof completed[number]): { input: number; output: number; per: string } | null {
-    if (run.priceOverride && (run.priceOverride.input > 0 || run.priceOverride.output > 0)) {
-      return { input: run.priceOverride.input, output: run.priceOverride.output, per: '1M' }
-    }
-    const key = `${canonicalProviderKey(run.providerName)}/${run.model}`
-    if (builtinPricing[key]) return builtinPricing[key]
-    return lookupBuiltin(run.model)
-  }
 
   function getFileMeta(file: AttachedFile | null): string {
     if (!file?.metadata) return ''
@@ -65,7 +65,7 @@ export function ResultsTab() {
   }
 
   const totalCost = completed.reduce((s, r) => {
-    const rate = getRate(r)
+    const rate = getRate(r, builtinPricing)
     return s + estimateCost(r.result?.inputTokens ?? 0, r.result?.outputTokens ?? 0, rate)
   }, 0)
 
@@ -86,7 +86,7 @@ export function ResultsTab() {
     for (const r of completed) {
       const key = `${canonicalProviderKey(r.providerName)}/${r.model}`
       const entry = map.get(key) || { runs: 0, inputTokens: 0, outputTokens: 0, inputCost: 0, outputCost: 0, cost: 0, latencyMs: [] }
-      const rate = getRate(r)
+      const rate = getRate(r, builtinPricing)
       const divisor = rate?.per === '1K' ? 1000 : 1_000_000
       const inCost = rate ? (r.result?.inputTokens ?? 0) / divisor * rate.input : 0
       const outCost = rate ? (r.result?.outputTokens ?? 0) / divisor * rate.output : 0
@@ -111,7 +111,7 @@ export function ResultsTab() {
     for (const r of completed) {
       const fileName = r.file?.name || '(no file)'
       const entry = map.get(fileName) || { runs: 0, inputTokens: 0, outputTokens: 0, inputCost: 0, outputCost: 0, cost: 0, latencyMs: [] }
-      const rate = getRate(r)
+      const rate = getRate(r, builtinPricing)
       const divisor = rate?.per === '1K' ? 1000 : 1_000_000
       const inCost = rate ? (r.result?.inputTokens ?? 0) / divisor * rate.input : 0
       const outCost = rate ? (r.result?.outputTokens ?? 0) / divisor * rate.output : 0
@@ -134,13 +134,12 @@ export function ResultsTab() {
   const byFileModel = useMemo(() => {
     const fileSet = new Set<string>()
     const modelSet = new Set<string>()
-    const rows: Record<string, any>[] = []
     const map = new Map<string, { file: string; model: string; inputTokens: number; outputTokens: number; inputCost: number; outputCost: number }>()
     for (const r of completed) {
       const fileName = r.file?.name || '(no file)'
       const modelKey = r.model.includes('/') ? r.model.split('/').pop()! : r.model
       const key = `${fileName}||${modelKey}`
-      const rate = getRate(r)
+      const rate = getRate(r, builtinPricing)
       const divisor = rate?.per === '1K' ? 1000 : 1_000_000
       const inCost = rate ? (r.result?.inputTokens ?? 0) / divisor * rate.input : 0
       const outCost = rate ? (r.result?.outputTokens ?? 0) / divisor * rate.output : 0
@@ -173,8 +172,8 @@ export function ResultsTab() {
     if (!sortField) return results
     const arr = [...results]
     arr.sort((a, b) => {
-      const rateA = getRate(a)
-      const rateB = getRate(b)
+      const rateA = getRate(a, builtinPricing)
+      const rateB = getRate(b, builtinPricing)
       const costA = a.status === 'skipped' ? 0 : estimateCost(a.result?.inputTokens ?? 0, a.result?.outputTokens ?? 0, rateA)
       const costB = b.status === 'skipped' ? 0 : estimateCost(b.result?.inputTokens ?? 0, b.result?.outputTokens ?? 0, rateB)
       let cmp = 0
@@ -239,7 +238,7 @@ export function ResultsTab() {
   async function exportCSV() {
     const headers = ['Provider', 'Model', 'Prompt', 'File', 'File Size', 'File Info', 'Status', 'Input $/M', 'Output $/M', 'Input Tokens', 'Output Tokens', 'Total Tokens', 'Latency (ms)', 'Error']
     const rows = results.map(r => {
-      const rate = getRate(r)
+      const rate = getRate(r, builtinPricing)
       return [
         r.providerName, r.model, truncate(r.sourceLabel, 100), r.file?.name ?? '',
         r.file ? formatFileSize(r.file.size) : '', getFileMeta(r.file),
@@ -259,7 +258,7 @@ export function ResultsTab() {
   }
 
   async function exportXLSX() {
-    const rate = (r: typeof results[number]) => { try { return getRate(r) } catch { return null } }
+    const rate = (r: typeof results[number]) => { try { return getRate(r, builtinPricing) } catch { return null } }
     const data = results.map(r => ({
       Provider: r.providerName,
       Model: r.model,
@@ -396,7 +395,7 @@ export function ResultsTab() {
               </thead>
               <tbody>
                 {sortedResults.map(r => {
-                  const rate = getRate(r)
+                  const rate = getRate(r, builtinPricing)
                   const cost = r.status === 'skipped' ? 0 : estimateCost(r.result?.inputTokens ?? 0, r.result?.outputTokens ?? 0, rate)
                   return (
                     <tr
