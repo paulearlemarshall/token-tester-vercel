@@ -62,17 +62,11 @@ async function seedDefaultsIfEmpty() {
   }
 }
 
-async function ensureDefaultUniqueness(sql: any, type: 'is_default_document' | 'is_default_image' | 'is_default_audio', excludeId?: number) {
+async function ensureDefaultUniqueness(sql: any, type: string, excludeId?: number) {
   if (excludeId) {
-    await sql`
-      update file_prompts set ${sql(type)} = false
-      where ${sql(type)} = true and id != ${excludeId}
-    `
+    await sql(`update file_prompts set ${type} = false where ${type} = true and id != ${excludeId}`)
   } else {
-    await sql`
-      update file_prompts set ${sql(type)} = false
-      where ${sql(type)} = true
-    `
+    await sql(`update file_prompts set ${type} = false where ${type} = true`)
   }
 }
 

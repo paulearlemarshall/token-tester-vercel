@@ -24,6 +24,7 @@ export function PromptsTab() {
   const [fpDefaultDoc, setFpDefaultDoc] = useState(false)
   const [fpDefaultImg, setFpDefaultImg] = useState(false)
   const [fpDefaultAud, setFpDefaultAud] = useState(false)
+  const [fpSaveError, setFpSaveError] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const folderInputRef = useRef<HTMLInputElement | null>(null)
 
@@ -261,6 +262,7 @@ export function PromptsTab() {
                   body: JSON.stringify(body),
                 })
                 if (res.ok) {
+                  setFpSaveError(null)
                   loadFilePrompts()
                   const saved = await res.json()
                   setFpEditorId(saved.id)
@@ -268,6 +270,9 @@ export function PromptsTab() {
                   setFpDefaultDoc(saved.is_default_document ?? false)
                   setFpDefaultImg(saved.is_default_image ?? false)
                   setFpDefaultAud(saved.is_default_audio ?? false)
+                } else {
+                  const err = await res.json().catch(() => ({ error: res.statusText }))
+                  setFpSaveError(err.error ?? 'Save failed')
                 }
               }}
               className="btn-primary text-xs whitespace-nowrap self-start"
@@ -289,6 +294,9 @@ export function PromptsTab() {
               Default for <span className="text-purple-400 font-medium">Audio</span>
             </label>
           </div>
+          {fpSaveError && (
+            <div className="text-xs text-red-400 bg-red-400/10 rounded px-2 py-1">{fpSaveError}</div>
+          )}
           <div className="text-xs space-y-1 pt-1 border-t border-surface-700">
             <span className="text-surface-500 font-medium">Current defaults:</span>
             {['document', 'image', 'audio'].map(type => {
