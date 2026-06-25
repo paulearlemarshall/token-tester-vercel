@@ -234,7 +234,7 @@ export function PromptsTab() {
           >
             <option value="">— New prompt —</option>
             {filePrompts.map(fp => (
-              <option key={fp.id} value={fp.id}>{fp.text.slice(0, 80)}{fp.text.length > 80 ? '…' : ''}</option>
+              <option key={fp.id} value={fp.id}>{fp.text}</option>
             ))}
           </select>
           <div className="flex gap-2 items-start">
@@ -524,10 +524,10 @@ export function PromptsTab() {
                   >
                     <option value="">None</option>
                     {filePrompts.map(fp => (
-                      <option key={fp.id} value={fp.id}>{fp.text.slice(0, 60)}{fp.text.length > 60 ? '…' : ''}</option>
+                      <option key={fp.id} value={fp.id}>{fp.text}</option>
                     ))}
                     {item.prompt && !filePrompts.some(fp => fp.text === item.prompt) && (
-                      <option value="__custom__" disabled>{item.prompt.slice(0, 40)}{item.prompt.length > 40 ? '…' : ''} (custom)</option>
+                      <option value="__custom__" disabled>{item.prompt} (custom)</option>
                     )}
                   </select>
                 </div>
