@@ -242,9 +242,9 @@ export const useStore = create<AppState>((set, get) => ({
 
   debugEntries: [],
   pushDebugEntry: (e) => set((s) => {
-    if (!e.runId) return { debugEntries: [e, ...s.debugEntries].slice(0, 50) }
+    if (!e.runId) return { debugEntries: [...s.debugEntries, e].slice(-50) }
     const existingIndex = s.debugEntries.findIndex(entry => entry.runId === e.runId)
-    if (existingIndex === -1) return { debugEntries: [e, ...s.debugEntries].slice(0, 50) }
+    if (existingIndex === -1) return { debugEntries: [...s.debugEntries, e].slice(-50) }
     const next = [...s.debugEntries]
     next[existingIndex] = e
     return { debugEntries: next }

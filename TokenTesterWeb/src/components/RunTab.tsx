@@ -1279,7 +1279,7 @@ export function RunTab() {
                           </div>
                           <div>
                             <span className="text-surface-500 font-medium">Payload: </span>
-                            <span className="font-mono text-surface-400 break-all">{truncate(run.preview.payloadPreview, 300)}</span>
+                            <span className="font-mono text-surface-400 break-all text-[10px]">{run.preview.payloadPreview}</span>
                           </div>
                           {run.preview.handlingNotes.length > 0 && (
                             <div>
