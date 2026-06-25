@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { Play, Square, Loader2, CheckCircle, XCircle, Clock, Trash2, ChevronRight, ChevronDown, ChevronLeft, ToggleLeft, ToggleRight, Search, Copy, X, Check, ArrowUp, ArrowDown, List, FileText, RotateCcw } from 'lucide-react'
 import { useStore } from '../store'
-import type { AttachedFile, DebugEntry, FileItem, TestRun } from '../types'
+import type { AttachedFile, DebugEntry, FileItem, RunPreviewInfo, TestRun } from '../types'
 import { estimateCost, formatDuration, truncate } from '../utils/formatters'
 import { webApi } from '../lib/web-api'
 import { canonicalProviderKey, effectivePricing as resolveEffectivePricing, pricingLookupKeys, type ProviderKeyInput } from '../lib/provider-key'
@@ -138,6 +138,190 @@ function usesCompletionTokensParam(model: string) {
   return /^o\d/i.test(model) || /^gpt-5/i.test(model) || model.toLowerCase().includes('reasoning')
 }
 
+type AudioRoute = 'transcription' | 'chat-compat' | 'responses' | 'none'
+
+function audioRoutingForModel(model: string, metas: any[], files: AttachedFile[]): AudioRoute {
+  const hasAudio = files.some(f => f.type === 'audio' || (f.mimeType || '').startsWith('audio/'))
+  if (!hasAudio) return 'none'
+  const hasNonAudioBinary = files.some(f => f.type !== 'audio' && f.type !== 'text' && !(f.mimeType || '').startsWith('audio/'))
+  if (hasNonAudioBinary) return 'none'
+  const meta = metas?.find(item => item.id === model)
+  const outMods = (meta?.outputModalities ?? []).map((m: string) => m.toLowerCase())
+  const isTranscription = outMods.includes('transcription') || /(?:^|\/)(whisper|gpt-4o-transcribe|gpt-4o-mini-transcribe)/i.test(model)
+  return isTranscription ? 'transcription' : 'chat-compat'
+}
+
+function formatSize(bytes: number) {
+  if (!bytes || bytes <= 0) return '0 B'
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+}
+
+function payloadPreviewFiles(files: AttachedFile[]): string[] {
+  const previews: string[] = []
+  for (const f of files) {
+    const ext = (f.ext || '').toLowerCase()
+    const mime = (f.mimeType || '').toLowerCase()
+    let label = 'FILE'
+    if (f.type === 'image' || mime.startsWith('image/')) label = 'IMAGE'
+    else if (f.type === 'audio' || mime.startsWith('audio/')) label = 'AUDIO'
+    else if (f.type === 'video' || mime.startsWith('video/')) label = 'VIDEO'
+    else if (ext === '.pdf' || mime === 'application/pdf') label = 'PDF'
+    const sizeLabel = formatSize(f.size)
+    previews.push(f.base64 ? `[BASE64_${label}: ${sizeLabel}]` : `[EMBEDDED_FILE: ${f.name}]`)
+  }
+  return previews
+}
+
+function computeRunPreview(provider: any, model: string, files: AttachedFile[], systemPrompt: string, userMessage: string): RunPreviewInfo {
+  const adapter = getProviderAdapter(provider)
+  const baseUrl = (provider.baseUrl || '').replace(/\/+$/, '')
+  const metas = provider.modelMetas || []
+  const audioRoute = audioRoutingForModel(model, metas, files)
+  const filePreviews = payloadPreviewFiles(files)
+  const hasAudio = files.some(f => f.type === 'audio' || (f.mimeType || '').startsWith('audio/'))
+  const hasImage = files.some(f => f.type === 'image' || (f.mimeType || '').startsWith('image/'))
+  const hasDoc = files.some(f => f.type === 'document' || (f.ext || '').toLowerCase() === '.pdf')
+  const effectiveUserMsg = userMessage || defaultUserMessage(model, files, hasAudio)
+
+  let endpoint: string
+  let payloadPreview: string
+  const handlingNotes: string[] = []
+
+  switch (adapter.id) {
+    case 'openai': {
+      if (audioRoute === 'transcription') {
+        endpoint = `${baseUrl}/v1/audio/transcriptions`
+        const parts = [`model: "${model}"`, `file: ${filePreviews[0] || '[BASE64_AUDIO]'}`]
+        payloadPreview = `multipart/form-data { ${parts.join(', ')} }`
+        handlingNotes.push(`Audio-only with transcription-capable model → /v1/audio/transcriptions`)
+        handlingNotes.push(`Each audio file transcribed separately, results concatenated as text`)
+      } else if (audioRoute === 'chat-compat') {
+        endpoint = `${baseUrl}/v1/chat/completions`
+        const contentParts: string[] = [`{ type: "text", text: ${JSON.stringify(truncate(effectiveUserMsg, 80))} }`]
+        for (const fp of filePreviews) {
+          contentParts.push(`{ type: "input_audio", input_audio: { data: ${fp}, format: "..." } }`)
+        }
+        const messages: string[] = []
+        if (systemPrompt) messages.push(`{ role: "system", content: ${JSON.stringify(truncate(systemPrompt, 60))} }`)
+        messages.push(`{ role: "user", content: [ ${contentParts.join(', ')} ] }`)
+        payloadPreview = `{ model: "${model}", messages: [ ${messages.join(', ')} ], max_tokens: 4096 }`
+        handlingNotes.push(`Audio on chat model (gpt-audio) → /v1/chat/completions with input_audio`)
+        handlingNotes.push(`System prompt goes into messages[0] (responses-style instructions not used here)`)
+      } else {
+        endpoint = `${baseUrl}/v1/responses`
+        const inputParts: string[] = [`{ type: "input_text", text: ${JSON.stringify(truncate(effectiveUserMsg, 80))} }`]
+        for (const fp of filePreviews) {
+          const partType = hasImage ? 'input_image' : hasDoc ? 'input_file' : 'input_text'
+          inputParts.push(`{ type: "${partType}", data: ${fp}, ... }`)
+        }
+        payloadPreview = `{ model: "${model}", input: [{ role: "user", content: [ ${inputParts.join(', ')} ] }]`
+        if (systemPrompt) payloadPreview += `, instructions: ${JSON.stringify(truncate(systemPrompt, 60))}`
+        payloadPreview += ` }`
+        handlingNotes.push(`Text/image/doc → /v1/responses (OpenAI Responses API)`)
+        handlingNotes.push(`System prompt sent as top-level "instructions"`)
+      }
+      break
+    }
+    case 'xai': {
+      if (audioRoute === 'transcription') {
+        endpoint = `${baseUrl}/v1/audio/transcriptions`
+        payloadPreview = `multipart/form-data { model: "${model}", file: ${filePreviews[0] || '[BASE64_AUDIO]'} }`
+        handlingNotes.push(`Audio-only with transcription model → /v1/audio/transcriptions`)
+      } else if (hasAudio) {
+        endpoint = `${baseUrl}/v1/stt`
+        payloadPreview = `[Audio transcribed first via /v1/stt, then transcript text sent]`
+        handlingNotes.push(`Audio attachments are first transcribed through /v1/stt, then sent as transcript text to the model`)
+        handlingNotes.push(`Final request uses /v1/responses with the transcript text`)
+      } else {
+        endpoint = `${baseUrl}/v1/responses`
+        const inputParts: string[] = [`{ type: "input_text", text: ${JSON.stringify(truncate(effectiveUserMsg, 80))} }`]
+        payloadPreview = `{ model: "${model}", input: [{ role: "user", content: [ ${inputParts.join(', ')} ] }]`
+        if (systemPrompt) payloadPreview += `, instructions: ${JSON.stringify(truncate(systemPrompt, 60))}`
+        payloadPreview += ` }`
+        handlingNotes.push(`Text/image → /v1/responses (xAI Responses API)`)
+      }
+      break
+    }
+    case 'anthropic': {
+      endpoint = `${baseUrl}/v1/messages`
+      const contentParts: string[] = [`{ type: "text", text: ${JSON.stringify(truncate(effectiveUserMsg, 80))} }`]
+      for (const fp of filePreviews) {
+        contentParts.push(`{ type: "image", source: { type: "base64", media_type: "...", data: ${fp} } }`)
+      }
+      payloadPreview = `{ model: "${model}", max_tokens: 4096, messages: [{ role: "user", content: [ ${contentParts.join(', ')} ] }]`
+      if (systemPrompt) payloadPreview += `, system: ${JSON.stringify(truncate(systemPrompt, 60))}`
+      payloadPreview += ` }`
+      handlingNotes.push(`Anthropic Messages API — /v1/messages`)
+      handlingNotes.push(`System prompt sent as top-level "system" parameter (not in messages)`)
+      if (hasAudio) handlingNotes.push(`Anthropic does not support audio attachments natively`)
+      break
+    }
+    case 'gemini': {
+      endpoint = `${baseUrl}/v1beta/models/${model}:generateContent`
+      const parts: string[] = [`{ text: ${JSON.stringify(truncate(effectiveUserMsg, 80))} }`]
+      for (const fp of filePreviews) {
+        parts.push(`{ inlineData: { mimeType: "...", data: ${fp} } }`)
+      }
+      payloadPreview = `{ contents: [{ role: "user", parts: [ ${parts.join(', ')} ] }]`
+      if (systemPrompt) payloadPreview += `, systemInstruction: { parts: [{ text: ${JSON.stringify(truncate(systemPrompt, 60))} }] }`
+      payloadPreview += ` }`
+      handlingNotes.push(`Gemini generateContent API — /v1beta/models/{model}:generateContent`)
+      handlingNotes.push(`Audio/video/image/document files sent as inlineData`)
+      break
+    }
+    case 'openrouter': {
+      if (audioRoute === 'transcription') {
+        endpoint = `${baseUrl}/v1/audio/transcriptions`
+        payloadPreview = `multipart/form-data { model: "${model}", file: ${filePreviews[0] || '[BASE64_AUDIO]'} }`
+        handlingNotes.push(`Audio-only with transcription-output model → /v1/audio/transcriptions via OpenRouter`)
+      } else {
+        endpoint = `${baseUrl}/v1/chat/completions`
+        const contentParts: string[] = [`{ type: "text", text: ${JSON.stringify(truncate(effectiveUserMsg, 80))} }`]
+        for (const fp of filePreviews) {
+          if (hasAudio) contentParts.push(`{ type: "input_audio", inputAudio: { data: ${fp}, format: "..." } }`)
+          else if (hasImage) contentParts.push(`{ type: "image_url", image_url: { url: "data:...;base64,${fp}" } }`)
+        }
+        const messages: string[] = []
+        if (systemPrompt) messages.push(`{ role: "system", content: ${JSON.stringify(truncate(systemPrompt, 60))} }`)
+        messages.push(`{ role: "user", content: [ ${contentParts.join(', ')} ] }`)
+        payloadPreview = `{ model: "${model}", messages: [ ${messages.join(', ')} ] }`
+        handlingNotes.push(`OpenRouter /v1/chat/completions`)
+        if (hasAudio) handlingNotes.push(`OpenRouter uses inputAudio content part for audio`)
+      }
+      break
+    }
+    default: {
+      endpoint = `${baseUrl}/v1/chat/completions`
+      const contentParts: string[] = [`{ type: "text", text: ${JSON.stringify(truncate(effectiveUserMsg, 80))} }`]
+      for (const fp of filePreviews) {
+        contentParts.push(`{ type: "image_url", image_url: { url: "data:...;base64,${fp}" } }`)
+      }
+      const messages: string[] = []
+      if (systemPrompt) messages.push(`{ role: "system", content: ${JSON.stringify(truncate(systemPrompt, 60))} }`)
+      messages.push(`{ role: "user", content: [ ${contentParts.join(', ')} ] }`)
+      payloadPreview = `{ model: "${model}", messages: [ ${messages.join(', ')} ] }`
+      handlingNotes.push(`OpenAI-compatible /v1/chat/completions`)
+      handlingNotes.push(`Attachment support depends on the provider's capabilities`)
+      break
+    }
+  }
+
+  if (!userMessage && files.length > 0) {
+    handlingNotes.push(`No user prompt provided; using default: ${JSON.stringify(effectiveUserMsg)}`)
+  }
+
+  return { endpoint, payloadPreview, handlingNotes }
+}
+
+function defaultUserMessage(model: string, files: AttachedFile[], hasAudio: boolean) {
+  if (files.length === 0) return 'Hello'
+  if (hasAudio && files.every(f => f.type === 'audio')) return 'Perform speech to text on this file'
+  if (files.length === 1) return `Analyze this file: ${files[0].name}`
+  return `Analyze the following ${files.length} files:`
+}
+
 function providerHandlingDetails(provider: any, selectedModels: string[]) {
   const adapter = getProviderAdapter(provider)
   const caps = getAttachmentCapabilities(provider)
@@ -268,6 +452,7 @@ export function RunTab() {
   const [hideFailedOutput, setHideFailedOutput] = useState(false)
   const [requestCollapsed, setRequestCollapsed] = useState(true)
   const [handlingProvider, setHandlingProvider] = useState<any | null>(null)
+  const [expandedQueueRun, setExpandedQueueRun] = useState<Set<string>>(new Set())
 
   const enabledProviders = config.providers.filter((p: any) => p.enabled)
 
@@ -466,6 +651,7 @@ export function RunTab() {
       const selected = getSelectedModels(prov.id, prov.models)
       for (const model of selected) {
         for (const tc of testCases) {
+          const files = tc.batchFiles ?? (tc.file ? [tc.file] : [])
           const run: TestRun = {
             id: crypto.randomUUID(),
             providerId: prov.id,
@@ -482,6 +668,7 @@ export function RunTab() {
             priceOverride: pricingLookupKeys(prov, model)
               .map(key => modelPricing[key])
               .find(price => price && (price.input > 0 || price.output > 0)),
+            preview: computeRunPreview(prov, model, files, systemPrompt, tc.userMessage),
           }
           const key = runIdentityKey(run)
           if (!existingKeys.has(key)) {
@@ -1019,58 +1206,96 @@ export function RunTab() {
             <div>
               <h3 className="text-sm font-semibold text-surface-300 mb-2">Queue ({queue.length})</h3>
               <div className="space-y-1 max-h-[400px] overflow-y-auto">
-                {queue.map((run: TestRun) => (
-                  <div key={run.id} className="card flex items-center gap-3 py-1.5 px-3">
-                    {run.status === 'queued' && <Clock size={14} className="text-surface-500 shrink-0" />}
-                    {run.status === 'running' && <Loader2 size={14} className="text-brand-gold animate-spin shrink-0" />}
-                    {run.status === 'success' && <CheckCircle size={14} className="text-emerald-400 shrink-0" />}
-                    {run.status === 'error' && <XCircle size={14} className="text-red-400 shrink-0" />}
-                    {run.status === 'skipped' && <Clock size={14} className="text-surface-400 shrink-0" />}
-                    <span className="text-xs font-mono text-brand-gold w-20 shrink-0 truncate">{run.providerName}</span>
-                    <span className="text-xs font-mono text-surface-300 w-28 shrink-0 truncate">{run.model}</span>
-                  <span className="text-xs text-surface-400 truncate flex-1">
-                    {run.sourceType === 'prompt' ? '💬' : '📄'}{' '}
-                    {(() => {
-                      const fp = run.file?.path
-                      return fp ? (
-                        <span className="truncate max-w-[200px] inline-block align-bottom" title={fp}>
-                          {run.sourceLabel}
-                        </span>
-                      ) : run.sourceLabel
-                    })()}
-                  </span>
-                    {run.result && (
-                      <span className="text-xs text-surface-500 shrink-0">
-                        {run.result.totalTokens > 0 ? `${run.result.totalTokens} tok` : ''}
-                        {run.result.latencyMs > 0 ? ` · ${formatDuration(run.result.latencyMs)}` : ''}
+                {queue.map((run: TestRun) => {
+                  const expanded = expandedQueueRun.has(run.id)
+                  return (
+                    <div key={run.id}>
+                      <div className="card flex items-center gap-3 py-1.5 px-3">
+                        <button
+                          onClick={() => setExpandedQueueRun(prev => {
+                            const next = new Set(prev)
+                            if (next.has(run.id)) next.delete(run.id); else next.add(run.id)
+                            return next
+                          })}
+                          className="text-surface-500 hover:text-surface-300 shrink-0"
+                          title={expanded ? 'Collapse details' : 'Expand details'}
+                        >
+                          {expanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                        </button>
+                        {run.status === 'queued' && <Clock size={14} className="text-surface-500 shrink-0" />}
+                        {run.status === 'running' && <Loader2 size={14} className="text-brand-gold animate-spin shrink-0" />}
+                        {run.status === 'success' && <CheckCircle size={14} className="text-emerald-400 shrink-0" />}
+                        {run.status === 'error' && <XCircle size={14} className="text-red-400 shrink-0" />}
+                        {run.status === 'skipped' && <Clock size={14} className="text-surface-400 shrink-0" />}
+                        <span className="text-xs font-mono text-brand-gold w-20 shrink-0 truncate">{run.providerName}</span>
+                        <span className="text-xs font-mono text-surface-300 w-28 shrink-0 truncate">{run.model}</span>
+                      <span className="text-xs text-surface-400 truncate flex-1">
+                        {run.sourceType === 'prompt' ? '💬' : '📄'}{' '}
+                        {(() => {
+                          const fp = run.file?.path
+                          return fp ? (
+                            <span className="truncate max-w-[200px] inline-block align-bottom" title={fp}>
+                              {run.sourceLabel}
+                            </span>
+                          ) : run.sourceLabel
+                        })()}
                       </span>
-                    )}
-                    {run.result?.error && (
-                      <span className={`text-xs truncate max-w-[150px] shrink-0 ${run.status === 'skipped' ? 'text-surface-400' : 'text-red-400'}`} title={run.result.error}>
-                        {truncate(run.result.error, 40)}
-                      </span>
-                    )}
-                    {run.status === 'error' && (
-                      <button
-                        onClick={() => retryRun(run)}
-                        disabled={isRunning}
-                        className="inline-flex items-center gap-1 rounded-md border border-brand-blue/35 bg-brand-blue/10 px-2 py-1 text-[10px] font-medium text-brand-blue transition-colors hover:bg-brand-blue/20 disabled:cursor-not-allowed disabled:opacity-40 dark:border-brand-gold/35 dark:bg-brand-gold/10 dark:text-brand-gold dark:hover:bg-brand-gold/20"
-                        title="Retry this failed task"
-                      >
-                        <RotateCcw size={12} />
-                        Retry
-                      </button>
-                    )}
-                    <button
-                      onClick={() => removeRun(run.id)}
-                      disabled={run.status === 'running'}
-                      className="text-surface-500 hover:text-red-400 disabled:opacity-30 shrink-0"
-                      title="Remove from queue"
-                    >
-                      <X size={14} />
-                    </button>
-                  </div>
-                ))}
+                        {run.result && (
+                          <span className="text-xs text-surface-500 shrink-0">
+                            {run.result.totalTokens > 0 ? `${run.result.totalTokens} tok` : ''}
+                            {run.result.latencyMs > 0 ? ` · ${formatDuration(run.result.latencyMs)}` : ''}
+                          </span>
+                        )}
+                        {run.result?.error && (
+                          <span className={`text-xs truncate max-w-[150px] shrink-0 ${run.status === 'skipped' ? 'text-surface-400' : 'text-red-400'}`} title={run.result.error}>
+                            {truncate(run.result.error, 40)}
+                          </span>
+                        )}
+                        {run.status === 'error' && (
+                          <button
+                            onClick={() => retryRun(run)}
+                            disabled={isRunning}
+                            className="inline-flex items-center gap-1 rounded-md border border-brand-blue/35 bg-brand-blue/10 px-2 py-1 text-[10px] font-medium text-brand-blue transition-colors hover:bg-brand-blue/20 disabled:cursor-not-allowed disabled:opacity-40 dark:border-brand-gold/35 dark:bg-brand-gold/10 dark:text-brand-gold dark:hover:bg-brand-gold/20"
+                            title="Retry this failed task"
+                          >
+                            <RotateCcw size={12} />
+                            Retry
+                          </button>
+                        )}
+                        <button
+                          onClick={() => removeRun(run.id)}
+                          disabled={run.status === 'running'}
+                          className="text-surface-500 hover:text-red-400 disabled:opacity-30 shrink-0"
+                          title="Remove from queue"
+                        >
+                          <X size={14} />
+                        </button>
+                      </div>
+                      {expanded && run.preview && (
+                        <div className="card border-t-0 rounded-t-none px-3 py-2 text-[11px] space-y-1.5">
+                          <div>
+                            <span className="text-surface-500 font-medium">Endpoint: </span>
+                            <span className="font-mono text-surface-300 break-all">{run.preview.endpoint}</span>
+                          </div>
+                          <div>
+                            <span className="text-surface-500 font-medium">Payload: </span>
+                            <span className="font-mono text-surface-400 break-all">{truncate(run.preview.payloadPreview, 300)}</span>
+                          </div>
+                          {run.preview.handlingNotes.length > 0 && (
+                            <div>
+                              <span className="text-surface-500 font-medium">Handling: </span>
+                              <ul className="list-disc list-inside text-surface-400 space-y-0.5 mt-0.5">
+                                {run.preview.handlingNotes.map((note, i) => (
+                                  <li key={i}>{note}</li>
+                                ))}
+                              </ul>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )
+                })}
               </div>
             </div>
           )}

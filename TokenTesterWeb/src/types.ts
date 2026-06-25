@@ -79,6 +79,12 @@ export interface ChatResult {
   responsePayload?: unknown
 }
 
+export interface RunPreviewInfo {
+  endpoint: string
+  payloadPreview: string
+  handlingNotes: string[]
+}
+
 export interface TestRun {
   id: string
   providerId: string
@@ -95,6 +101,7 @@ export interface TestRun {
   localInputTokens?: number
   timestamp: number
   priceOverride?: { input: number; output: number }
+  preview?: RunPreviewInfo
 }
 
 export type TabId = 'configure' | 'prompts' | 'run' | 'results' | 'archive'
