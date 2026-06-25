@@ -64,9 +64,9 @@ async function seedDefaultsIfEmpty() {
 
 async function ensureDefaultUniqueness(sql: any, type: string, excludeId?: number) {
   if (excludeId) {
-    await sql(`update file_prompts set ${type} = false where ${type} = true and id != ${excludeId}`)
+    await sql.query(`update file_prompts set ${type} = false where ${type} = true and id != $1`, [excludeId])
   } else {
-    await sql(`update file_prompts set ${type} = false where ${type} = true`)
+    await sql.query(`update file_prompts set ${type} = false where ${type} = true`)
   }
 }
 
