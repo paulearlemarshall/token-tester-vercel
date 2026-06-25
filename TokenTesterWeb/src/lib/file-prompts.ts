@@ -3,36 +3,49 @@ import { getSql } from './db'
 export interface FilePrompt {
   id: number
   text: string
-  file_type: string | null
+  is_default_document: boolean
+  is_default_image: boolean
+  is_default_audio: boolean
   created_at: string
   updated_at: string
 }
 
 export interface FilePromptInput {
   text: string
-  file_type?: string | null
+  is_default_document?: boolean
+  is_default_image?: boolean
+  is_default_audio?: boolean
+}
+
+export interface FilePromptDefaults {
+  document: { id: number; text: string } | null
+  image: { id: number; text: string } | null
+  audio: { id: number; text: string } | null
 }
 
 const DEFAULTS: FilePromptInput[] = [
-  { text: 'Extract the text from this document in order, reply with only the text', file_type: 'document' },
-  { text: 'Perform speech to text on this audio file, reply with only the text', file_type: 'audio' },
-  { text: 'Extract the text from this image, reply with only the text', file_type: 'image' },
+  { text: 'Extract the text from this document in order, reply with only the text', is_default_document: true },
+  { text: 'Perform speech to text on this audio file, reply with only the text', is_default_audio: true },
+  { text: 'Extract the text from this image, reply with only the text', is_default_image: true },
 ]
 
 let schemaReady = false
 
 async function ensureSchema() {
   if (schemaReady) return
-  const sql = getSql()
-  await (sql as any)`
+  const sql = getSql() as any
+  await sql`
     create table if not exists file_prompts (
       id serial primary key,
       text text not null,
-      file_type text,
+      is_default_document boolean not null default false,
+      is_default_image boolean not null default false,
+      is_default_audio boolean not null default false,
       created_at timestamptz not null default now(),
       updated_at timestamptz not null default now()
     )
   `
+  await sql`alter table file_prompts drop column if exists file_type`.catch(() => {})
   schemaReady = true
 }
 
@@ -43,8 +56,22 @@ async function seedDefaultsIfEmpty() {
   if (count > 0) return
   for (const d of DEFAULTS) {
     await sql`
-      insert into file_prompts (text, file_type)
-      values (${d.text}, ${d.file_type ?? null})
+      insert into file_prompts (text, is_default_document, is_default_image, is_default_audio)
+      values (${d.text}, ${d.is_default_document ?? false}, ${d.is_default_image ?? false}, ${d.is_default_audio ?? false})
+    `
+  }
+}
+
+async function ensureDefaultUniqueness(sql: any, type: 'is_default_document' | 'is_default_image' | 'is_default_audio', excludeId?: number) {
+  if (excludeId) {
+    await sql`
+      update file_prompts set ${sql(type)} = false
+      where ${sql(type)} = true and id != ${excludeId}
+    `
+  } else {
+    await sql`
+      update file_prompts set ${sql(type)} = false
+      where ${sql(type)} = true
     `
   }
 }
@@ -52,47 +79,76 @@ async function seedDefaultsIfEmpty() {
 export async function listFilePrompts(): Promise<FilePrompt[]> {
   await ensureSchema()
   await seedDefaultsIfEmpty()
-  const sql = getSql()
-  const rows: any = await sql`
-    select id, text, file_type, created_at, updated_at
+  const sql = getSql() as any
+  const rows = await sql`
+    select id, text, is_default_document, is_default_image, is_default_audio, created_at, updated_at
     from file_prompts
     order by id asc
   `
   return rows as FilePrompt[]
 }
 
+export async function getDefaults(): Promise<FilePromptDefaults> {
+  await ensureSchema()
+  const sql = getSql() as any
+  const rows: any[] = await sql`
+    select id, text, is_default_document, is_default_image, is_default_audio
+    from file_prompts
+    where is_default_document = true or is_default_image = true or is_default_audio = true
+  `
+  return {
+    document: rows.find((r: any) => r.is_default_document) ?? null,
+    image: rows.find((r: any) => r.is_default_image) ?? null,
+    audio: rows.find((r: any) => r.is_default_audio) ?? null,
+  }
+}
+
 export async function createFilePrompt(input: FilePromptInput): Promise<FilePrompt> {
   await ensureSchema()
-  const sql = getSql()
-  const rows: any = await sql`
-    insert into file_prompts (text, file_type)
-    values (${input.text}, ${input.file_type ?? null})
-    returning id, text, file_type, created_at, updated_at
+  const sql = getSql() as any
+
+  for (const flag of ['is_default_document', 'is_default_image', 'is_default_audio'] as const) {
+    if (input[flag]) await ensureDefaultUniqueness(sql, flag)
+  }
+
+  const rows = await sql`
+    insert into file_prompts (text, is_default_document, is_default_image, is_default_audio)
+    values (${input.text}, ${input.is_default_document ?? false}, ${input.is_default_image ?? false}, ${input.is_default_audio ?? false})
+    returning id, text, is_default_document, is_default_image, is_default_audio, created_at, updated_at
   `
   return rows[0] as FilePrompt
 }
 
 export async function updateFilePrompt(id: number, input: FilePromptInput): Promise<FilePrompt | null> {
-  const sql = getSql()
-  const rows: any = await sql`
+  const sql = getSql() as any
+
+  for (const flag of ['is_default_document', 'is_default_image', 'is_default_audio'] as const) {
+    if (input[flag]) await ensureDefaultUniqueness(sql, flag, id)
+  }
+
+  const rows = await sql`
     update file_prompts
-    set text = ${input.text}, file_type = ${input.file_type ?? null}, updated_at = now()
+    set text = ${input.text},
+        is_default_document = ${input.is_default_document ?? false},
+        is_default_image = ${input.is_default_image ?? false},
+        is_default_audio = ${input.is_default_audio ?? false},
+        updated_at = now()
     where id = ${id}
-    returning id, text, file_type, created_at, updated_at
+    returning id, text, is_default_document, is_default_image, is_default_audio, created_at, updated_at
   `
   return (rows[0] ?? null) as FilePrompt | null
 }
 
 export async function deleteFilePrompt(id: number): Promise<boolean> {
-  const sql = getSql()
-  const rows: any = await sql`
+  const sql = getSql() as any
+  const rows = await sql`
     delete from file_prompts where id = ${id}
     returning id
   `
   return rows.length > 0
 }
 
-export function defaultPromptForFileType(fileType: string): string {
+export function defaultPromptForFileType(fileType: string): string | null {
   switch (fileType) {
     case 'document':
       return 'Extract the text from this document in order, reply with only the text'
@@ -101,6 +157,6 @@ export function defaultPromptForFileType(fileType: string): string {
     case 'image':
       return 'Extract the text from this image, reply with only the text'
     default:
-      return 'Analyze this file'
+      return null
   }
 }

@@ -1,12 +1,12 @@
 import { NextResponse } from 'next/server'
-import { listFilePrompts, createFilePrompt, updateFilePrompt, deleteFilePrompt } from '@/lib/file-prompts'
+import { listFilePrompts, getDefaults, createFilePrompt, updateFilePrompt, deleteFilePrompt } from '@/lib/file-prompts'
 
 export const dynamic = 'force-dynamic'
 
 export async function GET() {
   try {
-    const prompts = await listFilePrompts()
-    return NextResponse.json(prompts)
+    const [prompts, defaults] = await Promise.all([listFilePrompts(), getDefaults()])
+    return NextResponse.json({ prompts, defaults })
   } catch (err: any) {
     return NextResponse.json({ error: err.message ?? String(err) }, { status: 503 })
   }

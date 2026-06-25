@@ -17,27 +17,27 @@ export function PromptsTab() {
   const [newPromptText, setNewPromptText] = useState('')
   const [isDraggingFiles, setIsDraggingFiles] = useState(false)
   const [dropNotice, setDropNotice] = useState<string | null>(null)
-  const [filePrompts, setFilePrompts] = useState<{ id: number; text: string; file_type: string | null }[]>([])
+  const [filePrompts, setFilePrompts] = useState<{ id: number; text: string; is_default_document: boolean; is_default_image: boolean; is_default_audio: boolean }[]>([])
+  const [defaults, setDefaults] = useState<Record<string, { id: number; text: string } | null>>({ document: null, image: null, audio: null })
   const [fpEditorId, setFpEditorId] = useState<number | null>(null)
   const [fpEditorText, setFpEditorText] = useState('')
+  const [fpDefaultDoc, setFpDefaultDoc] = useState(false)
+  const [fpDefaultImg, setFpDefaultImg] = useState(false)
+  const [fpDefaultAud, setFpDefaultAud] = useState(false)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const folderInputRef = useRef<HTMLInputElement | null>(null)
 
-  useEffect(() => {
+  function loadFilePrompts() {
     fetch('/api/file-prompts')
       .then(res => res.json())
-      .then(data => setFilePrompts(Array.isArray(data) ? data : []))
+      .then(data => {
+        if (data.prompts) setFilePrompts(data.prompts)
+        if (data.defaults) setDefaults(data.defaults)
+      })
       .catch(err => console.error('Failed to load file prompts', err))
-  }, [])
-
-  function promptForFileType(t: string) {
-    switch (t) {
-      case 'document': return 'Extract the text from this document in order, reply with only the text'
-      case 'audio': return 'Perform speech to text on this audio file, reply with only the text'
-      case 'image': return 'Extract the text from this image, reply with only the text'
-      default: return 'Analyze this file'
-    }
   }
+
+  useEffect(loadFilePrompts, [])
 
   function handleAddPrompt() {
     const text = newPromptText.trim()
@@ -46,13 +46,18 @@ export function PromptsTab() {
     setNewPromptText('')
   }
 
+  function defaultPromptByType(t: string): string {
+    const d = t === 'document' ? defaults.document : t === 'audio' ? defaults.audio : t === 'image' ? defaults.image : null
+    return d?.text ?? ''
+  }
+
   function createFileItem(file: AttachedFile): FileItem {
     return {
       id: crypto.randomUUID(),
       kind: 'file',
       name: file.name,
       path: file.path,
-      prompt: promptForFileType(file.type),
+      prompt: defaultPromptByType(file.type),
       size: file.size,
       fileCount: 1,
       file,
@@ -67,7 +72,7 @@ export function PromptsTab() {
       kind: 'folder',
       name,
       path: name,
-      prompt: promptForFileType(firstType),
+      prompt: defaultPromptByType(firstType),
       size: files.reduce((s, f) => s + f.size, 0),
       fileCount: files.length,
       files,
@@ -211,96 +216,130 @@ export function PromptsTab() {
       </div>
 
       <div>
-        <label className="label">File Prompt Library <span className="text-surface-500 font-normal">(saved prompts for files, keyed by type)</span></label>
+        <label className="label">File Prompt Library <span className="text-surface-500 font-normal">(saved prompts with default flags)</span></label>
         <div className="card p-3 space-y-2">
-          <div className="flex gap-2">
-            <select
-              className="input flex-1 text-xs"
-              value={fpEditorId ?? ''}
-              onChange={e => {
-                const id = e.target.value ? Number(e.target.value) : null
-                setFpEditorId(id)
-                const match = filePrompts.find(p => p.id === id)
-                setFpEditorText(match?.text ?? '')
-              }}
-            >
-              <option value="">— New prompt —</option>
-              {filePrompts.map(fp => (
-                <option key={fp.id} value={fp.id}>{fp.text.slice(0, 80)}{fp.text.length > 80 ? '…' : ''}</option>
-              ))}
-            </select>
+          <select
+            className="input text-xs w-full"
+            value={fpEditorId ?? ''}
+            onChange={e => {
+              const id = e.target.value ? Number(e.target.value) : null
+              setFpEditorId(id)
+              const match = filePrompts.find(p => p.id === id)
+              setFpEditorText(match?.text ?? '')
+              setFpDefaultDoc(match?.is_default_document ?? false)
+              setFpDefaultImg(match?.is_default_image ?? false)
+              setFpDefaultAud(match?.is_default_audio ?? false)
+            }}
+          >
+            <option value="">— New prompt —</option>
+            {filePrompts.map(fp => (
+              <option key={fp.id} value={fp.id}>{fp.text.slice(0, 80)}{fp.text.length > 80 ? '…' : ''}</option>
+            ))}
+          </select>
+          <div className="flex gap-2 items-start">
+            <textarea
+              className="input font-mono text-xs min-h-[60px] resize-y flex-1"
+              placeholder="Type or edit a file prompt..."
+              value={fpEditorText}
+              onChange={e => setFpEditorText(e.target.value)}
+            />
             <button
               onClick={async () => {
                 const text = fpEditorText.trim()
                 if (!text) return
+                const body = {
+                  ...(fpEditorId ? { id: fpEditorId } : {}),
+                  text,
+                  is_default_document: fpDefaultDoc,
+                  is_default_image: fpDefaultImg,
+                  is_default_audio: fpDefaultAud,
+                }
                 const method = fpEditorId ? 'PUT' : 'POST'
-                const body = fpEditorId ? { id: fpEditorId, text } : { text }
                 const res = await fetch('/api/file-prompts', {
                   method,
                   headers: { 'Content-Type': 'application/json' },
                   body: JSON.stringify(body),
                 })
                 if (res.ok) {
+                  loadFilePrompts()
                   const saved = await res.json()
-                  setFilePrompts(prev => {
-                    if (fpEditorId) return prev.map(p => p.id === saved.id ? saved : p)
-                    return [...prev, saved]
-                  })
                   setFpEditorId(saved.id)
                   setFpEditorText(saved.text)
+                  setFpDefaultDoc(saved.is_default_document ?? false)
+                  setFpDefaultImg(saved.is_default_image ?? false)
+                  setFpDefaultAud(saved.is_default_audio ?? false)
                 }
               }}
-              className="btn-primary text-xs whitespace-nowrap"
+              className="btn-primary text-xs whitespace-nowrap self-start"
             >
               Save
             </button>
           </div>
-          <textarea
-            className="input font-mono text-xs min-h-[60px] resize-y"
-            placeholder="Type or edit a file prompt..."
-            value={fpEditorText}
-            onChange={e => setFpEditorText(e.target.value)}
-          />
-          {filePrompts.length > 0 && (
-            <div className="space-y-1 max-h-40 overflow-y-auto">
-              {filePrompts.map(fp => (
-                <div key={fp.id} className="flex items-start gap-2 py-1 text-xs">
-                  <span className="text-surface-400 shrink-0 mt-0.5">
-                    {fp.file_type ? (
-                      <span className={`font-medium ${
-                        fp.file_type === 'document' ? 'text-blue-400' :
-                        fp.file_type === 'audio' ? 'text-purple-400' :
-                        'text-green-400'
-                      }`}>{fp.file_type}</span>
-                    ) : (
-                      <span className="text-surface-500">generic</span>
-                    )}
-                  </span>
-                  <span className="text-surface-300 flex-1 truncate">{fp.text}</span>
+          <div className="flex gap-4 text-xs text-surface-400">
+            <label className="flex items-center gap-1.5 cursor-pointer hover:text-surface-200">
+              <input type="checkbox" checked={fpDefaultDoc} onChange={e => setFpDefaultDoc(e.target.checked)} className="accent-brand-gold" />
+              Default for <span className="text-blue-400 font-medium">Document</span>
+            </label>
+            <label className="flex items-center gap-1.5 cursor-pointer hover:text-surface-200">
+              <input type="checkbox" checked={fpDefaultImg} onChange={e => setFpDefaultImg(e.target.checked)} className="accent-brand-gold" />
+              Default for <span className="text-green-400 font-medium">Image</span>
+            </label>
+            <label className="flex items-center gap-1.5 cursor-pointer hover:text-surface-200">
+              <input type="checkbox" checked={fpDefaultAud} onChange={e => setFpDefaultAud(e.target.checked)} className="accent-brand-gold" />
+              Default for <span className="text-purple-400 font-medium">Audio</span>
+            </label>
+          </div>
+          <div className="text-xs space-y-1 pt-1 border-t border-surface-700">
+            <span className="text-surface-500 font-medium">Current defaults:</span>
+            {['document', 'image', 'audio'].map(type => {
+              const d = defaults[type]
+              return (
+                <div key={type} className="flex items-center gap-2">
+                  <span className={`font-medium capitalize w-16 shrink-0 ${
+                    type === 'document' ? 'text-blue-400' : type === 'audio' ? 'text-purple-400' : 'text-green-400'
+                  }`}>{type}:</span>
+                  <span className="text-surface-300 truncate flex-1">{d?.text ?? <span className="text-surface-500 italic">null</span>}</span>
+                  {d && (
+                    <button
+                      onClick={() => {
+                        setFpEditorId(d.id)
+                        const match = filePrompts.find(p => p.id === d.id)
+                        setFpEditorText(match?.text ?? '')
+                        setFpDefaultDoc(match?.is_default_document ?? false)
+                        setFpDefaultImg(match?.is_default_image ?? false)
+                        setFpDefaultAud(match?.is_default_audio ?? false)
+                      }}
+                      className="text-surface-400 hover:text-surface-200"
+                      title="Edit this default prompt"
+                    >
+                      <FileTextIcon size={12} />
+                    </button>
+                  )}
                   <button
                     onClick={async () => {
-                      if (!confirm('Delete this prompt?')) return
+                      if (!d || !confirm(`Remove "${type}" default?`)) return
                       const res = await fetch('/api/file-prompts', {
-                        method: 'DELETE',
+                        method: 'PUT',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ id: fp.id }),
+                        body: JSON.stringify({
+                          id: d.id,
+                          text: d.text,
+                          is_default_document: type === 'document' ? false : filePrompts.find(p => p.id === d.id)?.is_default_document ?? false,
+                          is_default_image: type === 'image' ? false : filePrompts.find(p => p.id === d.id)?.is_default_image ?? false,
+                          is_default_audio: type === 'audio' ? false : filePrompts.find(p => p.id === d.id)?.is_default_audio ?? false,
+                        }),
                       })
-                      if (res.ok) {
-                        setFilePrompts(prev => prev.filter(p => p.id !== fp.id))
-                        if (fpEditorId === fp.id) {
-                          setFpEditorId(null)
-                          setFpEditorText('')
-                        }
-                      }
+                      if (res.ok) loadFilePrompts()
                     }}
-                    className="text-surface-400 hover:text-red-400 shrink-0"
+                    className="text-surface-400 hover:text-red-400"
+                    title="Remove this default"
                   >
-                    <X size={14} />
+                    <X size={12} />
                   </button>
                 </div>
-              ))}
-            </div>
-          )}
+              )
+            })}
+          </div>
         </div>
       </div>
 
@@ -463,45 +502,26 @@ export function PromptsTab() {
                 </div>
 
                 <div className="flex items-center gap-2 pl-7">
+                  <MessageSquare size={14} className={item.prompt ? 'text-brand-gold' : 'text-surface-500'} />
                   <select
-                    className="input text-xs bg-surface-800 py-1 h-7 w-36 shrink-0"
-                    value=''
+                    className="input text-xs bg-surface-800 py-1 h-7 flex-1"
+                    value={item.prompt ? filePrompts.find(fp => fp.text === item.prompt)?.id ?? '__custom__' : ''}
                     onChange={e => {
-                      const id = Number(e.target.value)
-                      if (!id) return
-                      const match = filePrompts.find(p => p.id === id)
-                      if (match) updateFileItem(item.id, { prompt: match.text })
+                      const v = e.target.value
+                      if (!v) { updateFileItem(item.id, { prompt: '' }); return }
+                      if (v === '__custom__') return
+                      const match = filePrompts.find(fp => fp.id === Number(v))
+                      updateFileItem(item.id, { prompt: match?.text ?? '' })
                     }}
                   >
-                    <option value="">Library…</option>
+                    <option value="">None</option>
                     {filePrompts.map(fp => (
-                      <option key={fp.id} value={fp.id}>{fp.text.slice(0, 40)}{fp.text.length > 40 ? '…' : ''}</option>
+                      <option key={fp.id} value={fp.id}>{fp.text.slice(0, 60)}{fp.text.length > 60 ? '…' : ''}</option>
                     ))}
+                    {item.prompt && !filePrompts.some(fp => fp.text === item.prompt) && (
+                      <option value="__custom__" disabled>{item.prompt.slice(0, 40)}{item.prompt.length > 40 ? '…' : ''} (custom)</option>
+                    )}
                   </select>
-                  {item.prompt ? (
-                    <>
-                      <MessageSquare size={14} className="text-brand-gold shrink-0" />
-                      <input
-                        className="input text-xs flex-1 bg-surface-800 py-1 h-7"
-                        value={item.prompt}
-                        onChange={e => updateFileItem(item.id, { prompt: e.target.value })}
-                        placeholder="Attached prompt..."
-                      />
-                      <button
-                        onClick={() => updateFileItem(item.id, { prompt: '' })}
-                        className="text-surface-400 hover:text-red-400 shrink-0"
-                      >
-                        <X size={14} />
-                      </button>
-                    </>
-                  ) : (
-                    <button
-                      onClick={() => updateFileItem(item.id, { prompt: ' ' })}
-                      className="text-xs text-surface-400 hover:text-brand-gold flex items-center gap-1 pl-7"
-                    >
-                      <Plus size={12} /> Add prompt
-                    </button>
-                  )}
                 </div>
 
                 {item.kind === 'folder' && item.files && item.files.length > 0 && (
