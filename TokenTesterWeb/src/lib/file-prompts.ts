@@ -46,6 +46,9 @@ async function ensureSchema() {
     )
   `
   await sql`alter table file_prompts drop column if exists file_type`.catch(() => {})
+  await sql`alter table file_prompts add column if not exists is_default_document boolean not null default false`.catch(() => {})
+  await sql`alter table file_prompts add column if not exists is_default_image boolean not null default false`.catch(() => {})
+  await sql`alter table file_prompts add column if not exists is_default_audio boolean not null default false`.catch(() => {})
   schemaReady = true
 }
 
