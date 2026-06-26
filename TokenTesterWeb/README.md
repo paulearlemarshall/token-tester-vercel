@@ -26,7 +26,7 @@ https://token-tester-web.vercel.app
 - Persist every completed run to Neon with checksums, timestamps, provider metadata, payloads, and pricing context.
 - Slice archived observations by provider, model, status, source, file, prompt, checksum, suppression state, and date.
 - Export archive data to XLS.
-- Inspect provider-specific request handling from the Run Tests tab.
+- Inspect provider-specific request handling from the Models tab.
 
 ## Runtime Stack
 
@@ -48,7 +48,8 @@ src/app/layout.tsx                       Global metadata/layout
 src/components/TokenTesterApp.tsx        Main tabbed interface
 src/components/ConfigureTab.tsx          Provider setup, model fetch, pricing entry point
 src/components/PromptsTab.tsx            Prompt and file input management
-src/components/RunTab.tsx                Queue generation, execution, retries, provider handling inspector
+src/components/ModelsTab.tsx             Model presets, provider model selection, selected model summary
+src/components/RunTab.tsx                Queue generation, execution, retries, output inspection
 src/components/ResultsTab.tsx            Current in-memory run results, charts, exports
 src/components/ResultsArchiveTab.tsx     Persisted archive filters, tables, charts, XLS export
 src/components/PricingNavigator.tsx      Pricing records, effective prices, evidence
@@ -72,7 +73,7 @@ scripts/seed-pricing.mjs                 Pricing importer
 2. Fetch models from providers.
 3. Review or adjust pricing in the Pricing navigator.
 4. Create or select prompts and upload test files.
-5. Select models on the Run Tests tab.
+5. Select models or load a model preset on the Models tab.
 6. Generate the queue.
 7. Run all queued work or retry individual failed rows.
 8. Review current run output in Results.
@@ -119,17 +120,27 @@ It supports:
 
 The browser computes deterministic input identity before archiving so repeat observations can be grouped later.
 
-### Run Tests
+### Models
 
-The Run Tests tab selects models, generates work, runs jobs, and exposes provider-specific behavior.
+The Models tab manages the model working set used by queue generation.
 
 It supports:
 
-- Provider/model search and selection.
 - DB-backed model presets, with save-by-name overwrite and delete.
-- A selected-models table showing provider, model, input price, and output price.
-- Missing preset models remain visible and are highlighted when they are not in the current provider model list.
+- Provider/model search and selection.
+- Provider model sorting by active state, name, input price, and output price.
+- Provider modality filters where provider discovery exposes modality metadata.
 - Per-model price editing.
+- A sortable selected-models table showing provider, model, input price, and output price.
+- Missing preset models remaining visible and highlighted when they are not in the current provider model list.
+- Provider/model Handling inspector.
+
+### Run Tests
+
+The Run Tests tab generates work, runs jobs, and shows queue/output execution detail.
+
+It supports:
+
 - Queue generation across selected providers, models, prompts, and files.
 - Incremental queue generation.
 - Run-all for queued work only.
@@ -222,7 +233,7 @@ Provider behavior is controlled by adapter ID, not only the broad protocol famil
 
 ## Provider Handling Inspector
 
-Each provider on the Run Tests tab has a `Handling` button. It opens a provider/model navigator that explains what the app will do under the hood.
+Each provider on the Models tab has a `Handling` button. It opens a provider/model navigator that explains what the app will do under the hood.
 
 The inspector shows:
 

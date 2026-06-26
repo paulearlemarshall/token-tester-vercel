@@ -1,10 +1,11 @@
-import { Settings, FileText, Play, BarChart3, Monitor, Moon, Sun, Archive } from 'lucide-react'
+import { Settings, FileText, Play, BarChart3, Monitor, Moon, Sun, Archive, Boxes } from 'lucide-react'
 import { useStore } from '../../store'
 import type { TabId, ThemeMode } from '../../types'
 
 const NAV: { id: TabId; label: string; icon: typeof Settings }[] = [
   { id: 'configure', label: 'Configure', icon: Settings },
   { id: 'prompts', label: 'Prompts & Files', icon: FileText },
+  { id: 'models', label: 'Models', icon: Boxes },
   { id: 'run', label: 'Run', icon: Play },
   { id: 'results', label: 'Results', icon: BarChart3 },
   { id: 'archive', label: 'Results Archive', icon: Archive },

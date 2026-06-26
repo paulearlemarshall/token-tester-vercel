@@ -119,7 +119,7 @@ export interface TestRun {
   preview?: RunPreviewInfo
 }
 
-export type TabId = 'configure' | 'prompts' | 'run' | 'results' | 'archive'
+export type TabId = 'configure' | 'prompts' | 'models' | 'run' | 'results' | 'archive'
 
 export type ThemeMode = 'system' | 'light' | 'dark'
 

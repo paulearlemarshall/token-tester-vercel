@@ -12,6 +12,7 @@ This directory is the Vercel-deployable Next.js App Router port of the Token Tes
 
 - `src/app`: Next.js routes, layout, global CSS, and server API route handlers.
 - `src/components`: client UI tabs for configure, prompts, run, results, and navigation.
+- `src/components/ModelsTab.tsx`: model presets, provider model selection, pricing edits, and selected-model summary.
 - `src/lib/provider-api.ts`: server-side provider discovery and chat completion adapters.
 - `src/lib/pricing.ts`: Neon-backed model pricing reads and writes.
 - `src/lib/model-presets.ts`: Neon-backed model preset reads and writes.

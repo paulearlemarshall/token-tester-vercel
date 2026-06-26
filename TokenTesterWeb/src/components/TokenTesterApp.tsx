@@ -5,6 +5,7 @@ import { useStore } from '../store'
 import { Sidebar } from './layout/Sidebar'
 import { ConfigureTab } from './ConfigureTab'
 import { PromptsTab } from './PromptsTab'
+import { ModelsTab } from './ModelsTab'
 import { RunTab } from './RunTab'
 import { ResultsTab } from './ResultsTab'
 import { ResultsArchiveTab } from './ResultsArchiveTab'
@@ -44,6 +45,7 @@ export function TokenTesterApp() {
       <main className="flex-1 overflow-y-auto">
         {activeTab === 'configure' && <ConfigureTab />}
         {activeTab === 'prompts' && <PromptsTab />}
+        {activeTab === 'models' && <ModelsTab />}
         {activeTab === 'run' && <RunTab />}
         {activeTab === 'results' && <ResultsTab />}
         {activeTab === 'archive' && <ResultsArchiveTab />}
