@@ -1,9 +1,8 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { ArrowDown, ArrowUp, BarChart3, Search } from 'lucide-react'
-import { webApi } from '../lib/web-api'
 import { buildModelStatsRows, type ModelStatsRow } from '../lib/model-stats'
-import type { ArchivedRunResult } from '../types'
 import { formatCurrency, formatDuration, formatFileSize, formatNumber } from '../utils/formatters'
+import { useStore } from '../store'
 
 type SortField = keyof Pick<ModelStatsRow,
   'providerName' | 'model' | 'documentCategory' | 'documentType' | 'runs' | 'successRate' |
@@ -12,8 +11,11 @@ type SortField = keyof Pick<ModelStatsRow,
 >
 
 export function ModelStatsTab() {
-  const [records, setRecords] = useState<ArchivedRunResult[]>([])
-  const [loading, setLoading] = useState(true)
+  const {
+    archivedRecords: records,
+    archivedRecordsLoading: loading,
+    loadArchivedRecords,
+  } = useStore()
   const [query, setQuery] = useState('')
   const [provider, setProvider] = useState('')
   const [model, setModel] = useState('')
@@ -22,10 +24,8 @@ export function ModelStatsTab() {
   const [sort, setSort] = useState<{ field: SortField; dir: 'asc' | 'desc' }>({ field: 'lastRunTimestamp', dir: 'desc' })
 
   useEffect(() => {
-    webApi.getArchivedResults(5000)
-      .then(data => setRecords(data.records ?? []))
-      .finally(() => setLoading(false))
-  }, [])
+    loadArchivedRecords(5000)
+  }, [loadArchivedRecords])
 
   const rows = useMemo(() => buildModelStatsRows(records), [records])
   const providers = useMemo(() => unique(rows.map(row => row.providerName)), [rows])

@@ -7,14 +7,14 @@ import * as XLSX from 'xlsx'
 import { webApi } from '../lib/web-api'
 import type { ArchivedRunResult } from '../types'
 import { formatCurrency, formatDuration, formatFileSize, formatNumber } from '../utils/formatters'
+import { inferDocumentType } from '../lib/model-stats'
+import { useStore } from '../store'
 
 type SortField = 'completedAt' | 'createdAt' | 'providerName' | 'model' | 'status' | 'sourceType' | 'fileName' | 'prompt' | 'inputHash' | 'pdfSent' | 'pdfFileSize' | 'imageSent' | 'imageFileSize' | 'videoSent' | 'videoFileSize' | 'audioSent' | 'audioFileSize' | 'inputTokens' | 'outputTokens' | 'latencyMs' | 'estimatedCost' | 'suppressed'
 
 const COLORS = ['#f5c84c', '#57a6ff', '#37c391', '#f97316', '#a78bfa', '#ef4444', '#14b8a6', '#ec4899']
 
 const RECORD_COLUMNS: { id: SortField; label: string; cellClassName?: string; cell: (record: ArchivedRunResult) => ReactNode }[] = [
-  { id: 'completedAt', label: 'Completed', cellClassName: 'text-xs text-surface-400 whitespace-nowrap', cell: record => new Date(record.completedAt).toLocaleString() },
-  { id: 'createdAt', label: 'Archived', cellClassName: 'text-xs text-surface-400 whitespace-nowrap', cell: record => new Date(record.createdAt).toLocaleString() },
   { id: 'providerName', label: 'Provider', cellClassName: 'text-surface-200', cell: record => record.providerName },
   { id: 'model', label: 'Model', cellClassName: 'font-mono text-xs text-surface-200', cell: record => record.model },
   { id: 'status', label: 'Status', cell: record => <StatusBadge status={record.status} /> },
@@ -30,24 +30,31 @@ const RECORD_COLUMNS: { id: SortField; label: string; cellClassName?: string; ce
   { id: 'videoFileSize', label: 'Video Size', cellClassName: 'text-right font-mono text-xs', cell: record => mediaSize(record.videoFileSize) },
   { id: 'audioSent', label: 'Audio Sent', cell: record => <YesNo value={record.audioSent} /> },
   { id: 'audioFileSize', label: 'Audio Size', cellClassName: 'text-right font-mono text-xs', cell: record => mediaSize(record.audioFileSize) },
-  { id: 'inputTokens', label: 'In', cellClassName: 'text-right font-mono text-xs', cell: record => formatNumber(record.inputTokens) },
-  { id: 'outputTokens', label: 'Out', cellClassName: 'text-right font-mono text-xs', cell: record => formatNumber(record.outputTokens) },
+  { id: 'inputTokens', label: 'In Tokens', cellClassName: 'text-right font-mono text-xs', cell: record => formatNumber(record.inputTokens) },
+  { id: 'outputTokens', label: 'Out Tokens', cellClassName: 'text-right font-mono text-xs', cell: record => formatNumber(record.outputTokens) },
   { id: 'latencyMs', label: 'Latency', cellClassName: 'text-right font-mono text-xs', cell: record => formatDuration(record.latencyMs) },
   { id: 'estimatedCost', label: 'Cost', cellClassName: 'text-right font-mono text-xs', cell: record => formatCurrency(record.estimatedCost ?? 0) },
+  { id: 'completedAt', label: 'Completed', cellClassName: 'text-xs text-surface-400 whitespace-nowrap', cell: record => new Date(record.completedAt).toLocaleString() },
   { id: 'suppressed', label: 'Suppressed', cell: record => record.suppressed ? <span className="rounded border border-surface-500/30 bg-surface-700 px-2 py-0.5 text-xs text-surface-300">Yes</span> : <span className="text-surface-500">No</span> },
 ]
 
 export function ResultsArchiveTab() {
-  const [records, setRecords] = useState<ArchivedRunResult[]>([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
+  const {
+    archivedRecords: records,
+    archivedRecordsLoading: loading,
+    archivedRecordsError: error,
+    loadArchivedRecords,
+    updateArchivedRecords,
+  } = useStore()
   const [query, setQuery] = useState('')
   const [provider, setProvider] = useState('')
   const [model, setModel] = useState('')
   const [status, setStatus] = useState('')
   const [sourceType, setSourceType] = useState('')
   const [fileName, setFileName] = useState('')
-  const [view, setView] = useState<'table' | 'charts'>('charts')
+  const [documentType, setDocumentType] = useState('')
+  const [category, setCategory] = useState('')
+  const [view, setView] = useState<'table' | 'charts'>('table')
   const [tableView, setTableView] = useState<'records' | 'file' | 'prompt'>('records')
   const [visibility, setVisibility] = useState<'active' | 'all' | 'suppressed'>('all')
   const [archiveMode, setArchiveMode] = useState<'latest' | 'history'>('latest')
@@ -58,40 +65,20 @@ export function ResultsArchiveTab() {
   const [draggedColumn, setDraggedColumn] = useState<SortField | null>(null)
 
   async function loadArchive() {
-    setLoading(true)
-    setError(null)
-    try {
-      const data = await webApi.getArchivedResults(2000)
-      setRecords(data.records ?? [])
-    } catch (err: any) {
-      setError(err.message ?? String(err))
-    } finally {
-      setLoading(false)
-    }
+    await loadArchivedRecords(5000, true)
   }
 
   useEffect(() => {
-    let cancelled = false
-    webApi.getArchivedResults(2000)
-      .then(data => {
-        if (!cancelled) setRecords(data.records ?? [])
-      })
-      .catch(err => {
-        if (!cancelled) setError(err.message ?? String(err))
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false)
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [])
+    loadArchivedRecords(5000)
+  }, [loadArchivedRecords])
 
   const providers = useMemo(() => [...new Set(records.map(r => r.providerName).filter(Boolean))].sort(), [records])
   const models = useMemo(() => [...new Set(records.map(r => r.model).filter(Boolean))].sort(), [records])
   const statuses = useMemo(() => [...new Set(records.map(r => r.status).filter(Boolean))].sort(), [records])
   const sourceTypes = useMemo(() => [...new Set(records.map(r => r.sourceType).filter(Boolean))].sort(), [records])
   const fileNames = useMemo(() => [...new Set(records.map(r => r.fileName || '(no file)'))].sort(), [records])
+  const documentTypes = useMemo(() => [...new Set(records.map(r => inferDocumentType(r)))].sort(), [records])
+  const categories = useMemo(() => [...new Set(records.map(r => r.documentCategory).filter((v): v is string => !!v))].sort(), [records])
   const visibleRecords = useMemo(() => {
     if (archiveMode === 'history') return records
     const latest = new Map<string, ArchivedRunResult>()
@@ -117,6 +104,8 @@ export function ResultsArchiveTab() {
       if (status && record.status !== status) return false
       if (sourceType && record.sourceType !== sourceType) return false
       if (fileName && (record.fileName || '(no file)') !== fileName) return false
+      if (documentType && inferDocumentType(record) !== documentType) return false
+      if (category && record.documentCategory !== category) return false
       if (!q) return true
       const haystack = [
         record.providerName,
@@ -130,12 +119,14 @@ export function ResultsArchiveTab() {
         record.fileHash,
         record.inputHash,
         record.userMessageHash,
+        inferDocumentType(record),
+        record.documentCategory,
         record.responseText,
         record.error,
       ].filter(Boolean).join(' ').toLowerCase()
       return haystack.includes(q)
     })
-  }, [visibleRecords, query, provider, model, status, sourceType, fileName, visibility])
+  }, [visibleRecords, query, provider, model, status, sourceType, fileName, documentType, category, visibility])
 
   const sorted = useMemo(() => {
     const sign = sortDir === 'asc' ? 1 : -1
@@ -250,7 +241,7 @@ export function ResultsArchiveTab() {
     const ids = Array.from(selectedIds)
     if (ids.length === 0) return
     await webApi.updateArchivedResultsSuppressed(ids, suppressed)
-    setRecords(current => current.map(record => ids.includes(record.id) ? { ...record, suppressed } : record))
+    updateArchivedRecords(current => current.map(record => ids.includes(record.id) ? { ...record, suppressed } : record))
     setSelectedIds(new Set())
   }
 
@@ -260,7 +251,7 @@ export function ResultsArchiveTab() {
     const confirmed = window.confirm(`Delete ${ids.length} archived result${ids.length === 1 ? '' : 's'} permanently? This cannot be undone.`)
     if (!confirmed) return
     await webApi.deleteArchivedResults(ids)
-    setRecords(current => current.filter(record => !ids.includes(record.id)))
+    updateArchivedRecords(current => current.filter(record => !ids.includes(record.id)))
     setSelectedIds(new Set())
   }
 
@@ -271,6 +262,8 @@ export function ResultsArchiveTab() {
     setStatus('')
     setSourceType('')
     setFileName('')
+    setDocumentType('')
+    setCategory('')
     setVisibility('all')
     setArchiveMode('latest')
     setTableView('records')
@@ -397,6 +390,8 @@ export function ResultsArchiveTab() {
         <FilterSelect value={status} onChange={setStatus} options={statuses} label="All statuses" />
         <FilterSelect value={sourceType} onChange={setSourceType} options={sourceTypes} label="All sources" />
         <FilterSelect value={fileName} onChange={setFileName} options={fileNames} label="All files" />
+        <FilterSelect value={documentType} onChange={setDocumentType} options={documentTypes} label="All doc types" />
+        <FilterSelect value={category} onChange={setCategory} options={categories} label="All categories" />
         <select value={archiveMode} onChange={e => setArchiveMode(e.target.value as typeof archiveMode)} className="input min-w-44">
           <option value="latest">Latest per checksum</option>
           <option value="history">All observations</option>
@@ -413,11 +408,11 @@ export function ResultsArchiveTab() {
           Export XLS
         </button>
         <div className="ml-auto flex rounded-lg border border-surface-700 bg-surface-850 p-1">
-          <button onClick={() => setView('charts')} className={`px-3 py-1.5 text-xs rounded-md flex items-center gap-1.5 ${view === 'charts' ? 'bg-brand-gold text-brand-charcoal' : 'text-surface-400 hover:text-surface-100'}`}>
-            <BarChart3 size={14} /> Charts
-          </button>
           <button onClick={() => setView('table')} className={`px-3 py-1.5 text-xs rounded-md flex items-center gap-1.5 ${view === 'table' ? 'bg-brand-gold text-brand-charcoal' : 'text-surface-400 hover:text-surface-100'}`}>
             <Table2 size={14} /> Table
+          </button>
+          <button onClick={() => setView('charts')} className={`px-3 py-1.5 text-xs rounded-md flex items-center gap-1.5 ${view === 'charts' ? 'bg-brand-gold text-brand-charcoal' : 'text-surface-400 hover:text-surface-100'}`}>
+            <BarChart3 size={14} /> Charts
           </button>
         </div>
       </div>

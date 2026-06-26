@@ -1,7 +1,8 @@
 import { create } from 'zustand'
-import type { AppConfig, AttachedFile, DebugEntry, FileItem, PromptEntry, ProviderConfig, TabId, TestRun, ThemeMode } from './types'
+import type { AppConfig, ArchivedRunResult, AttachedFile, DebugEntry, FileItem, PromptEntry, ProviderConfig, TabId, TestRun, ThemeMode } from './types'
 import { PROVIDER_PRESETS } from './utils/constants'
 import { inferProviderAdapterId } from './lib/provider-registry'
+import { webApi } from './lib/web-api'
 
 function loadJSON<T>(key: string, fallback: T): T {
   try {
@@ -111,6 +112,13 @@ interface AppState {
   pushDebugEntry: (e: DebugEntry) => void
   removeDebugEntry: (runId: string) => void
   clearDebugEntries: () => void
+
+  archivedRecords: ArchivedRunResult[]
+  archivedRecordsLoadedAt: number | null
+  archivedRecordsLoading: boolean
+  archivedRecordsError: string | null
+  loadArchivedRecords: (limit?: number, force?: boolean) => Promise<void>
+  updateArchivedRecords: (updater: (records: ArchivedRunResult[]) => ArchivedRunResult[]) => void
 
   isRunning: boolean
   setIsRunning: (v: boolean) => void
@@ -258,6 +266,33 @@ export const useStore = create<AppState>((set, get) => ({
     debugEntries: s.debugEntries.filter(entry => entry.runId !== runId),
   })),
   clearDebugEntries: () => set({ debugEntries: [] }),
+
+  archivedRecords: [],
+  archivedRecordsLoadedAt: null,
+  archivedRecordsLoading: false,
+  archivedRecordsError: null,
+  loadArchivedRecords: async (limit = 5000, force = false) => {
+    const state = get()
+    if (!force && (state.archivedRecordsLoading || state.archivedRecordsLoadedAt)) return
+    set({ archivedRecordsLoading: true, archivedRecordsError: null })
+    try {
+      const data = await webApi.getArchivedResults(limit)
+      set({
+        archivedRecords: data.records ?? [],
+        archivedRecordsLoadedAt: Date.now(),
+        archivedRecordsLoading: false,
+      })
+    } catch (err: any) {
+      set({
+        archivedRecordsError: err.message ?? String(err),
+        archivedRecordsLoading: false,
+      })
+    }
+  },
+  updateArchivedRecords: (updater) => set((s) => ({
+    archivedRecords: updater(s.archivedRecords),
+    archivedRecordsLoadedAt: Date.now(),
+  })),
 
   isRunning: false,
   setIsRunning: (v) => set({ isRunning: v }),
