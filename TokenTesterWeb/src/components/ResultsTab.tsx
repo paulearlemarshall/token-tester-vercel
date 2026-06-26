@@ -265,6 +265,7 @@ export function ResultsTab() {
     const data = results.map(r => ({
       Provider: r.providerName,
       Model: r.model,
+      'Run Name': r.runName ?? '',
       Prompt: r.sourceLabel,
       File: r.file?.name ?? '',
       'File Size': r.file ? formatFileSize(r.file.size) : '',
@@ -382,6 +383,7 @@ export function ResultsTab() {
               <thead className="bg-surface-800 sticky top-0">
                 <tr className="group">
                   <SortHeader field="provider" className="text-left px-4 py-2 text-surface-400 font-medium text-xs">Provider</SortHeader>
+                  <th className="text-left px-4 py-2 text-surface-400 font-medium text-xs">Run Name</th>
                   <SortHeader field="model" className="text-left px-4 py-2 text-surface-400 font-medium text-xs">Model</SortHeader>
                   <SortHeader field="inRate" className="text-right px-4 py-2 text-surface-400 font-medium text-xs">In $/M</SortHeader>
                   <SortHeader field="outRate" className="text-right px-4 py-2 text-surface-400 font-medium text-xs">Out $/M</SortHeader>
@@ -407,6 +409,7 @@ export function ResultsTab() {
                       className="border-t border-surface-700 hover:bg-surface-800/50 cursor-pointer"
                     >
                       <td className="px-4 py-2 text-surface-200 font-mono text-xs">{r.providerName}</td>
+                      <td className="px-4 py-2 text-surface-300 font-mono text-xs">{r.runName || '—'}</td>
                       <td className="px-4 py-2 text-surface-200 font-mono text-xs">{r.model}</td>
                       <td className="px-4 py-2 text-right font-mono text-xs text-surface-300">{rate ? formatCurrency(rate.input) : '—'}</td>
                       <td className="px-4 py-2 text-right font-mono text-xs text-surface-300">{rate ? formatCurrency(rate.output) : '—'}</td>
@@ -654,6 +657,7 @@ export function ResultsTab() {
                 <div className="grid grid-cols-2 gap-4 text-xs">
                   <div><span className="text-surface-400">Provider:</span> <span className="text-surface-200">{r.providerName}</span></div>
                   <div><span className="text-surface-400">Model:</span> <span className="text-surface-200">{r.model}</span></div>
+                  <div><span className="text-surface-400">Run Name:</span> <span className="text-surface-200">{r.runName || '—'}</span></div>
                   <div><span className="text-surface-400">File:</span> <span className="text-surface-200">{r.file?.name ?? '—'}</span></div>
                   <div><span className="text-surface-400">Status:</span> <span className={r.status === 'success' ? 'text-emerald-400' : r.status === 'skipped' ? 'text-surface-400' : 'text-red-400'}>{r.status}</span></div>
                   <div><span className="text-surface-400">Input Tokens:</span> <span className="text-surface-200">{formatNumber(r.result?.inputTokens ?? 0)}</span></div>

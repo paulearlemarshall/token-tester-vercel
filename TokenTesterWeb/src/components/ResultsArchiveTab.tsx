@@ -287,6 +287,7 @@ export function ResultsArchiveTab() {
       'Provider ID': record.providerId ?? '',
       Provider: record.providerName,
       'Service Provider': record.serviceProvider,
+      'Run Name': record.runName ?? '',
       Model: record.model,
       'Source Type': record.sourceType,
       'Source Label': record.sourceLabel,
