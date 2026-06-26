@@ -1,4 +1,5 @@
 import { encode } from 'gpt-tokenizer'
+import type { ModelPresetModel } from '../types'
 import type { ChatParams, ModelFetchParams } from './provider-api'
 
 async function sendJson<T>(url: string, payload: unknown, method = 'POST'): Promise<T> {
@@ -39,6 +40,20 @@ export const webApi = {
     const res = await fetch(`/api/results?limit=${encodeURIComponent(limit)}`)
     if (!res.ok) return { records: [] }
     return res.json()
+  },
+
+  async getModelPresets() {
+    const res = await fetch('/api/model-presets')
+    if (!res.ok) return { presets: [] }
+    return res.json()
+  },
+
+  saveModelPreset(params: { name: string; models: ModelPresetModel[] }) {
+    return sendJson<any>('/api/model-presets', params, 'PUT')
+  },
+
+  deleteModelPreset(id: number) {
+    return sendJson<any>('/api/model-presets', { id }, 'DELETE')
   },
 
   saveArchivedResult(params: unknown) {

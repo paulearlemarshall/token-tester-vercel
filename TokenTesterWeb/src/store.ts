@@ -92,6 +92,7 @@ interface AppState {
 
   modelScope: Record<string, Record<string, boolean>>
   setModelScope: (providerId: string, modelId: string, inScope: boolean) => void
+  setModelScopes: (scope: Record<string, Record<string, boolean>>) => void
   toggleAllModels: (providerId: string, inScope: boolean) => void
 
   modelPricing: Record<string, { input: number; output: number }>
@@ -205,11 +206,15 @@ export const useStore = create<AppState>((set, get) => ({
     const current = s.modelScope[providerId] ?? {}
     return { modelScope: { ...s.modelScope, [providerId]: { ...current, [modelId]: inScope } } }
   }),
+  setModelScopes: (scope) => set({ modelScope: scope }),
   toggleAllModels: (providerId, inScope) => set((s) => {
     const prov = s.config.providers.find((p: ProviderConfig) => p.id === providerId)
     if (!prov) return s
     const all: Record<string, boolean> = {}
     prov.models.forEach((m: string) => { all[m] = inScope })
+    if (!inScope) {
+      for (const model of Object.keys(s.modelScope[providerId] ?? {})) all[model] = false
+    }
     return { modelScope: { ...s.modelScope, [providerId]: all } }
   }),
 

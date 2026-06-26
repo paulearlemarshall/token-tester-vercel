@@ -25,7 +25,7 @@ export interface FilePromptDefaults {
 
 const DEFAULTS: FilePromptInput[] = [
   { text: 'Extract the text from this document in order, reply with only the text', is_default_document: true },
-  { text: 'Perform speech to text on this audio file, reply with only the text', is_default_audio: true },
+  { text: 'Perform speech to text on this file', is_default_audio: true },
   { text: 'Extract the text from this image, reply with only the text', is_default_image: true },
 ]
 
@@ -65,6 +65,50 @@ async function seedDefaultsIfEmpty() {
   }
 }
 
+async function ensureAudioDefault() {
+  const sql = getSql() as any
+  const defaultAudioPrompt = defaultPromptForFileType('audio')
+  const rows = await sql`
+    select id, text
+    from file_prompts
+    where is_default_audio = true
+    order by updated_at desc
+    limit 1
+  `
+  const current = rows[0]
+  if (current?.text === 'Perform speech to text on this audio file, reply with only the text') {
+    await sql`
+      update file_prompts
+      set text = ${defaultAudioPrompt},
+          updated_at = now()
+      where id = ${current.id}
+    `
+    return
+  }
+  if (current?.text && !String(current.text).toLowerCase().includes('document')) return
+
+  await sql`update file_prompts set is_default_audio = false where is_default_audio = true`
+  const matching = await sql`
+    select id
+    from file_prompts
+    where text = ${defaultAudioPrompt}
+    limit 1
+  `
+  if (matching[0]?.id) {
+    await sql`
+      update file_prompts
+      set is_default_audio = true,
+          updated_at = now()
+      where id = ${matching[0].id}
+    `
+    return
+  }
+  await sql`
+    insert into file_prompts (text, is_default_audio)
+    values (${defaultAudioPrompt}, true)
+  `
+}
+
 async function ensureDefaultUniqueness(sql: any, type: string, excludeId?: number) {
   if (excludeId) {
     await sql.query(`update file_prompts set ${type} = false where ${type} = true and id != $1`, [excludeId])
@@ -76,6 +120,7 @@ async function ensureDefaultUniqueness(sql: any, type: string, excludeId?: numbe
 export async function listFilePrompts(): Promise<FilePrompt[]> {
   await ensureSchema()
   await seedDefaultsIfEmpty()
+  await ensureAudioDefault()
   const sql = getSql() as any
   const rows = await sql`
     select id, text, is_default_document, is_default_image, is_default_audio, created_at, updated_at
@@ -87,6 +132,8 @@ export async function listFilePrompts(): Promise<FilePrompt[]> {
 
 export async function getDefaults(): Promise<FilePromptDefaults> {
   await ensureSchema()
+  await seedDefaultsIfEmpty()
+  await ensureAudioDefault()
   const sql = getSql() as any
   const rows: any[] = await sql`
     select id, text, is_default_document, is_default_image, is_default_audio
@@ -150,7 +197,7 @@ export function defaultPromptForFileType(fileType: string): string | null {
     case 'document':
       return 'Extract the text from this document in order, reply with only the text'
     case 'audio':
-      return 'Perform speech to text on this audio file, reply with only the text'
+      return 'Perform speech to text on this file'
     case 'image':
       return 'Extract the text from this image, reply with only the text'
     default:

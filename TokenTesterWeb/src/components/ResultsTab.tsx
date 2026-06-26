@@ -41,10 +41,13 @@ export function ResultsTab() {
   const [sortField, setSortField] = useState<SortField | null>(null)
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc')
 
-  const results = queue.filter(r => r.status === 'success' || r.status === 'error' || r.status === 'skipped')
+  const results = useMemo(
+    () => queue.filter(r => r.status === 'success' || r.status === 'error' || r.status === 'skipped'),
+    [queue]
+  )
 
-  const completed = results.filter(r => r.status === 'success')
-  const skipped = results.filter(r => r.status === 'skipped')
+  const completed = useMemo(() => results.filter(r => r.status === 'success'), [results])
+  const skipped = useMemo(() => results.filter(r => r.status === 'skipped'), [results])
 
   const totalInputTokens = completed.reduce((s, r) => s + (r.result?.inputTokens ?? 0), 0)
   const totalOutputTokens = completed.reduce((s, r) => s + (r.result?.outputTokens ?? 0), 0)

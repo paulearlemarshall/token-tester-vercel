@@ -18,6 +18,7 @@ export function ConfigureTab() {
     ok: boolean
     title: string
     responseText: string
+    results?: { provider: string; ok: boolean; responseText: string; modelCount?: number; error?: string }[]
   }>(null)
   const [responseCollapsed, setResponseCollapsed] = useState(true)
   const [copiedResponse, setCopiedResponse] = useState(false)
@@ -94,6 +95,101 @@ export function ConfigureTab() {
     setShowAdd(false)
   }
 
+  async function saveFetchedPricing(prov: ProviderConfig, result: any) {
+    if (!result.pricing) return
+    const providerKey = canonicalProviderKey(prov)
+    for (const [modelId, p] of Object.entries(result.pricing) as [string, {input: number; output: number}][]) {
+      const rawModel = result.rawModels?.[modelId] ?? null
+      useStore.getState().setModelPricing(`${providerKey}/${modelId}`, p.input, p.output)
+      webApi.savePricing({
+        serviceProvider: providerKey,
+        modelId,
+        input: p.input,
+        output: p.output,
+        displayName: modelId,
+        source: 'provider-discovery',
+        sourcePriority: 100,
+        rawProviderPayload: rawModel ?? {
+          provider: prov.name,
+          baseUrl: prov.baseUrl,
+          modelId,
+          pricing: p,
+        },
+        matchStatus: 'matched',
+        matchConfidence: 1,
+        matchMethod: 'provider-model-id',
+        matchEvidence: {
+          source: 'provider-discovery',
+          provider: prov.name,
+          serviceProvider: providerKey,
+          modelId,
+          providerModelId: modelId,
+          reason: 'Price came from the same provider model discovery row used to populate the model list.',
+        },
+      }).catch(err => console.error('Failed to save fetched pricing', err))
+    }
+  }
+
+  async function fetchAndApplyModels(prov: ProviderConfig) {
+    const result = await webApi.fetchModels({
+      type: prov.type,
+      adapterId: prov.adapterId,
+      baseUrl: prov.baseUrl,
+      apiKeyEnv: prov.apiKeyEnv,
+      headers: prov.headers,
+    })
+    if (!result.models?.length) {
+      throw new Error(result.error || 'No models returned')
+    }
+    updateProvider(prov.id, { models: result.models, modelMetas: result.modelMetas })
+    await saveFetchedPricing(prov, result)
+    return result
+  }
+
+  async function updateActiveProviderModels() {
+    const activeProviders = config.providers.filter((prov: ProviderConfig) => prov.enabled)
+    if (activeProviders.length === 0) {
+      setFetchDialog({
+        provider: 'Active providers',
+        ok: false,
+        title: 'No active providers to update',
+        responseText: 'Enable at least one provider before updating models.',
+      })
+      return
+    }
+    setFetching('all')
+    const results = []
+    for (const prov of activeProviders) {
+      try {
+        const result = await fetchAndApplyModels(prov)
+        setFetchedOk(s => ({ ...s, [prov.id]: true }))
+        results.push({
+          provider: prov.name,
+          ok: true,
+          modelCount: result.models?.length ?? 0,
+          responseText: result.responseText || JSON.stringify(result, null, 2),
+        })
+      } catch (err: any) {
+        setFetchedOk(s => ({ ...s, [prov.id]: false }))
+        results.push({
+          provider: prov.name,
+          ok: false,
+          error: err.message ?? String(err),
+          responseText: err.message ?? String(err),
+        })
+      }
+    }
+    const okCount = results.filter(result => result.ok).length
+    setFetchDialog({
+      provider: `${activeProviders.length} active provider${activeProviders.length === 1 ? '' : 's'}`,
+      ok: okCount === results.length,
+      title: `Updated models: ${okCount}/${results.length} succeeded`,
+      responseText: JSON.stringify(results, null, 2),
+      results,
+    })
+    setFetching(null)
+  }
+
   async function copyFetchResponse() {
     if (!fetchDialog?.responseText) return
     try {
@@ -127,6 +223,14 @@ export function ConfigureTab() {
           </button>
           <button onClick={() => setShowAdd(!showAdd)} className="btn-primary flex items-center gap-2">
             <Plus size={16} /> Add Provider
+          </button>
+          <button
+            onClick={updateActiveProviderModels}
+            disabled={fetching !== null}
+            className="btn-secondary flex items-center gap-2"
+          >
+            {fetching === 'all' ? <Loader2 size={16} className="animate-spin" /> : <RefreshCw size={16} />}
+            Update Models
           </button>
         </div>
       </div>
@@ -278,64 +382,14 @@ export function ConfigureTab() {
                         onClick={async () => {
                           setFetching(prov.id)
                           try {
-                            const result = await webApi.fetchModels({
-                              type: prov.type,
-                              adapterId: prov.adapterId,
-                              baseUrl: prov.baseUrl,
-                              apiKeyEnv: prov.apiKeyEnv,
-                              headers: prov.headers,
+                            const result = await fetchAndApplyModels(prov)
+                            setFetchedOk(s => ({ ...s, [prov.id]: true }))
+                            setFetchDialog({
+                              provider: prov.name,
+                              ok: true,
+                              title: `Fetched models for ${prov.name}`,
+                              responseText: result.responseText || JSON.stringify(result, null, 2),
                             })
-                            if (result.models?.length) {
-                              updateProvider(prov.id, { models: result.models, modelMetas: result.modelMetas })
-                              setFetchedOk(s => ({ ...s, [prov.id]: true }))
-                              setFetchDialog({
-                                provider: prov.name,
-                                ok: true,
-                                title: `Fetched models for ${prov.name}`,
-                                responseText: result.responseText || JSON.stringify(result, null, 2),
-                              })
-                              if (result.pricing) {
-                                const providerKey = canonicalProviderKey(prov)
-                                for (const [modelId, p] of Object.entries(result.pricing) as [string, {input: number; output: number}][]) {
-                                  const rawModel = result.rawModels?.[modelId] ?? null
-                                  useStore.getState().setModelPricing(`${providerKey}/${modelId}`, p.input, p.output)
-                                  webApi.savePricing({
-                                    serviceProvider: providerKey,
-                                    modelId,
-                                    input: p.input,
-                                    output: p.output,
-                                    displayName: modelId,
-                                    source: 'provider-discovery',
-                                    sourcePriority: 100,
-                                    rawProviderPayload: rawModel ?? {
-                                      provider: prov.name,
-                                      baseUrl: prov.baseUrl,
-                                      modelId,
-                                      pricing: p,
-                                    },
-                                    matchStatus: 'matched',
-                                    matchConfidence: 1,
-                                    matchMethod: 'provider-model-id',
-                                    matchEvidence: {
-                                      source: 'provider-discovery',
-                                      provider: prov.name,
-                                      serviceProvider: providerKey,
-                                      modelId,
-                                      providerModelId: modelId,
-                                      reason: 'Price came from the same provider model discovery row used to populate the model list.',
-                                    },
-                                  }).catch(err => console.error('Failed to save fetched pricing', err))
-                                }
-                              }
-                            } else {
-                              setFetchedOk(s => ({ ...s, [prov.id]: false }))
-                              setFetchDialog({
-                                provider: prov.name,
-                                ok: false,
-                                title: `Fetch failed for ${prov.name}`,
-                                responseText: result.error || 'No models returned',
-                              })
-                            }
                           } catch (err: any) {
                             setFetchedOk(s => ({ ...s, [prov.id]: false }))
                             setFetchDialog({
@@ -406,6 +460,34 @@ export function ConfigureTab() {
               </button>
             </div>
             <div className="p-5 space-y-4">
+              {fetchDialog.results && (
+                <div className="space-y-2">
+                  {fetchDialog.results.map(result => {
+                    const parsed = (() => {
+                      try { return JSON.parse(result.responseText) } catch { return null }
+                    })()
+                    const body = parsed ? JSON.stringify(parsed, null, 2) : result.responseText
+                    return (
+                      <details key={result.provider} className={`overflow-hidden rounded-xl border ${result.ok ? 'border-brand-blue/30 bg-brand-blue/5 dark:border-brand-gold/30 dark:bg-brand-gold/5' : 'border-red-900/50 bg-red-950/20'}`}>
+                        <summary className="flex cursor-pointer items-center justify-between gap-3 px-4 py-3 text-sm">
+                          <span className={result.ok ? 'text-surface-200' : 'text-red-200'}>
+                            {result.provider}
+                            <span className="ml-2 text-xs text-surface-500">
+                              {result.ok ? `${result.modelCount ?? 0} models` : result.error}
+                            </span>
+                          </span>
+                          <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${result.ok ? 'bg-emerald-500/15 text-emerald-300' : 'bg-red-500/15 text-red-300'}`}>
+                            {result.ok ? 'success' : 'fail'}
+                          </span>
+                        </summary>
+                        <pre className="max-h-72 overflow-auto border-t border-surface-800 p-4 text-xs font-mono leading-relaxed text-surface-200 whitespace-pre-wrap break-all">
+                          {body}
+                        </pre>
+                      </details>
+                    )
+                  })}
+                </div>
+              )}
               <div className="flex items-center justify-between gap-3">
                 <button
                   onClick={() => setResponseCollapsed(v => !v)}

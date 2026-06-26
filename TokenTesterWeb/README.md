@@ -16,6 +16,8 @@ https://token-tester-web.vercel.app
 - Seed baseline pricing from `simonw/llm-prices`.
 - Override model prices manually from the UI.
 - Queue prompt, file, folder, single-file, and batch-file tests across many providers and models.
+- Save, load, overwrite, and delete DB-backed model presets for repeat provider/model working sets.
+- Show the active selected model set with provider, model, input price, output price, and missing-model warnings.
 - Preserve completed queue rows when adding more models.
 - Skip unsupported file/provider combinations without retrying fake placeholder content.
 - Run text, image, PDF, DOCX, audio, video, and batch-file workloads where provider adapters support them.
@@ -87,6 +89,7 @@ It supports:
 - Built-in provider presets.
 - Custom OpenAI-compatible providers.
 - Server-side model fetching through `POST /api/models`.
+- Bulk model fetching for every enabled provider through the Update Models button.
 - Provider API keys stored in Vercel/local environment variables, not browser state.
 - Importing provider-discovered prices into Neon.
 - Opening the Pricing navigator.
@@ -123,6 +126,9 @@ The Run Tests tab selects models, generates work, runs jobs, and exposes provide
 It supports:
 
 - Provider/model search and selection.
+- DB-backed model presets, with save-by-name overwrite and delete.
+- A selected-models table showing provider, model, input price, and output price.
+- Missing preset models remain visible and are highlighted when they are not in the current provider model list.
 - Per-model price editing.
 - Queue generation across selected providers, models, prompts, and files.
 - Incremental queue generation.
@@ -405,10 +411,25 @@ This makes it possible to see cost and token changes over time while still havin
 Main tables:
 
 ```sql
+model_presets
 model_prices
 model_price_records
 run_results
 ```
+
+`model_presets` stores named provider/model working sets:
+
+```sql
+model_presets (
+  id bigserial primary key,
+  name text not null,
+  models jsonb not null default '[]'::jsonb,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+)
+```
+
+Preset names are unique case-insensitively. Saving a preset with an existing name overwrites the model list.
 
 `model_prices` stores the effective legacy/current view:
 
@@ -519,6 +540,18 @@ Important indexes cover:
 Fetches provider models using server-side API keys.
 
 Returns normalized model metadata and any parsed pricing data available from provider discovery.
+
+### `GET /api/model-presets`
+
+Returns saved model presets.
+
+### `PUT /api/model-presets`
+
+Creates or overwrites a named model preset with the currently selected provider/model set.
+
+### `DELETE /api/model-presets`
+
+Deletes a model preset by ID.
 
 ### `POST /api/chat`
 

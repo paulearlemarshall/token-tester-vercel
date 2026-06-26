@@ -34,6 +34,21 @@ export interface ProviderConfig {
   headers?: string
 }
 
+export interface ModelPresetModel {
+  providerName: string
+  providerId?: string
+  adapterId?: ProviderAdapterId
+  model: string
+}
+
+export interface ModelPreset {
+  id: number
+  name: string
+  models: ModelPresetModel[]
+  createdAt: string
+  updatedAt: string
+}
+
 export interface PromptEntry {
   id: string
   text: string

@@ -1,7 +1,7 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Play, Square, Loader2, CheckCircle, XCircle, Clock, Trash2, ChevronRight, ChevronDown, ChevronLeft, ToggleLeft, ToggleRight, Search, Copy, X, Check, ArrowUp, ArrowDown, List, FileText, RotateCcw } from 'lucide-react'
 import { useStore } from '../store'
-import type { AttachedFile, DebugEntry, FileItem, RunPreviewInfo, TestRun } from '../types'
+import type { AttachedFile, DebugEntry, FileItem, ModelPreset, ModelPresetModel, RunPreviewInfo, TestRun } from '../types'
 import { estimateCost, formatDuration, truncate } from '../utils/formatters'
 import { webApi } from '../lib/web-api'
 import { canonicalProviderKey, effectivePricing as resolveEffectivePricing, pricingLookupKeys, type ProviderKeyInput } from '../lib/provider-key'
@@ -65,6 +65,10 @@ function runIdentityKey(run: Pick<TestRun, 'providerId' | 'model' | 'sourceType'
     fileKey(run.file),
     batchKey,
   ].join('||')
+}
+
+function createRunTimestamp() {
+  return Date.now()
 }
 
 async function sha256Hex(value: string) {
@@ -435,7 +439,7 @@ export function RunTab() {
     config, systemPrompt, customPrompts, fileItems,
     queue, setQueue, updateRun, clearQueue,
     isRunning, setIsRunning, setActiveTab,
-    modelScope, setModelScope, toggleAllModels,
+    modelScope, setModelScope, setModelScopes, toggleAllModels,
     modelPricing, setModelPricing, builtinPricing,
     debugEntries, pushDebugEntry, removeDebugEntry, clearDebugEntries,
   } = useStore()
@@ -453,8 +457,18 @@ export function RunTab() {
   const [requestCollapsed, setRequestCollapsed] = useState(true)
   const [handlingProvider, setHandlingProvider] = useState<any | null>(null)
   const [expandedQueueRun, setExpandedQueueRun] = useState<Set<string>>(new Set())
+  const [modelPresets, setModelPresets] = useState<ModelPreset[]>([])
+  const [activePresetId, setActivePresetId] = useState('')
+  const [presetName, setPresetName] = useState('')
+  const [presetStatus, setPresetStatus] = useState<string | null>(null)
 
   const enabledProviders = config.providers.filter((p: any) => p.enabled)
+
+  useEffect(() => {
+    webApi.getModelPresets()
+      .then(data => setModelPresets(data.presets ?? []))
+      .catch(err => setPresetStatus(`Could not load model presets: ${err.message ?? String(err)}`))
+  }, [])
 
   function setSearch(providerId: string, value: string) {
     setSearches(s => ({ ...s, [providerId]: value }))
@@ -475,7 +489,78 @@ export function RunTab() {
   }
 
   function getSelectedModels(providerId: string, models: string[]): string[] {
-    return models.filter(m => isModelSelected(providerId, m))
+    const scoped = Object.entries(modelScope[providerId] ?? {})
+      .filter(([, selected]) => selected)
+      .map(([model]) => model)
+    return Array.from(new Set([...models.filter(m => isModelSelected(providerId, m)), ...scoped])).sort()
+  }
+
+  function providerMatchesPresetModel(provider: any, presetModel: ModelPresetModel) {
+    if (presetModel.providerId && provider.id === presetModel.providerId) return true
+    if (provider.name === presetModel.providerName) return true
+    return Boolean(presetModel.adapterId && provider.adapterId === presetModel.adapterId && provider.name.toLowerCase() === presetModel.providerName.toLowerCase())
+  }
+
+  function selectedModelRows() {
+    return enabledProviders.flatMap((provider: any) =>
+      getSelectedModels(provider.id, provider.models).map(model => ({
+        provider,
+        model,
+        available: provider.models.includes(model),
+        pricing: effectivePricing(provider, model),
+      }))
+    )
+  }
+
+  function currentPresetModels(): ModelPresetModel[] {
+    return selectedModelRows().map(row => ({
+      providerId: row.provider.id,
+      providerName: row.provider.name,
+      adapterId: row.provider.adapterId,
+      model: row.model,
+    }))
+  }
+
+  function applyPreset(preset: ModelPreset) {
+    const nextScope: Record<string, Record<string, boolean>> = {}
+    for (const provider of enabledProviders) {
+      const selected: Record<string, boolean> = {}
+      for (const item of preset.models) {
+        if (providerMatchesPresetModel(provider, item)) selected[item.model] = true
+      }
+      nextScope[provider.id] = selected
+    }
+    setModelScopes(nextScope)
+    setActivePresetId(String(preset.id))
+    setPresetName(preset.name)
+    const missing = preset.models.filter(item => !enabledProviders.some((provider: any) => providerMatchesPresetModel(provider, item)))
+    setPresetStatus(missing.length > 0 ? `${missing.length} preset model provider match${missing.length === 1 ? '' : 'es'} not found in enabled providers.` : null)
+  }
+
+  async function saveCurrentPreset() {
+    const name = presetName.trim()
+    if (!name) {
+      setPresetStatus('Enter a preset name before saving.')
+      return
+    }
+    const preset = await webApi.saveModelPreset({ name, models: currentPresetModels() })
+    const data = await webApi.getModelPresets()
+    setModelPresets(data.presets ?? [])
+    setActivePresetId(String(preset.id))
+    setPresetName(preset.name)
+    setPresetStatus(`Saved preset "${preset.name}".`)
+  }
+
+  async function deleteActivePreset() {
+    const preset = modelPresets.find(item => String(item.id) === activePresetId)
+    if (!preset) return
+    if (!confirm(`Delete model preset "${preset.name}"?`)) return
+    await webApi.deleteModelPreset(preset.id)
+    const data = await webApi.getModelPresets()
+    setModelPresets(data.presets ?? [])
+    setActivePresetId('')
+    setPresetName('')
+    setPresetStatus(`Deleted preset "${preset.name}".`)
   }
 
   const SORT_CYCLE: ('active' | 'name-asc' | 'name-desc' | 'input-asc' | 'input-desc' | 'output-asc' | 'output-desc')[] = [
@@ -516,7 +601,11 @@ export function RunTab() {
 
   function filteredModels(providerId: string, models: string[]): string[] {
     const q = (searches[providerId] || '').toLowerCase()
-    let list = q ? models.filter(m => m.toLowerCase().includes(q)) : models
+    const scopedMissing = Object.entries(modelScope[providerId] ?? {})
+      .filter(([model, selected]) => selected && !models.includes(model))
+      .map(([model]) => model)
+    const allModels = Array.from(new Set([...models, ...scopedMissing]))
+    let list = q ? allModels.filter(m => m.toLowerCase().includes(q)) : allModels
     const modFilter = modalityFilters[providerId]
     if (modFilter) {
       const prov = config.providers.find((p: any) => p.id === providerId)
@@ -527,7 +616,7 @@ export function RunTab() {
         if (direction === 'out') return (m.outputModalities || []).includes(modality)
         return m.modality?.includes(modality)
       }).map((m: any) => m.id))
-      list = list.filter(m => modModelIds.has(m))
+      list = list.filter(m => modModelIds.has(m) || scopedMissing.includes(m))
     }
     return list
   }
@@ -664,7 +753,7 @@ export function RunTab() {
             file: tc.file,
             batchFiles: tc.batchFiles,
             status: 'queued',
-            timestamp: Date.now(),
+            timestamp: createRunTimestamp(),
             priceOverride: pricingLookupKeys(prov, model)
               .map(key => modelPricing[key])
               .find(price => price && (price.input > 0 || price.output > 0)),
@@ -899,6 +988,7 @@ export function RunTab() {
     ? Math.min(outputIndex, filteredDebugEntries.length - 1)
     : 0
   const displayEntry = filteredDebugEntries.length > 0 ? filteredDebugEntries[displayIndex] : null
+  const selectedRows = selectedModelRows()
 
   function formatLatency(ms: number): string {
     if (ms < 1000) return `${ms}ms`
@@ -997,6 +1087,63 @@ export function RunTab() {
               </div>
             </div>
           )}
+
+          <div className="card space-y-3">
+            <div className="flex flex-wrap items-end gap-3">
+              <div className="min-w-56 flex-1">
+                <label className="label">Model Preset</label>
+                <div className="flex gap-2">
+                  <select
+                    className="input text-sm"
+                    value={activePresetId}
+                    onChange={e => {
+                      const id = e.target.value
+                      if (!id) {
+                        setActivePresetId('')
+                        setPresetName('')
+                        setPresetStatus(null)
+                        return
+                      }
+                      const preset = modelPresets.find(item => String(item.id) === id)
+                      if (preset) applyPreset(preset)
+                    }}
+                  >
+                    <option value="">Select a preset...</option>
+                    {modelPresets.map(preset => (
+                      <option key={preset.id} value={preset.id}>{preset.name}</option>
+                    ))}
+                  </select>
+                  <button
+                    onClick={deleteActivePreset}
+                    disabled={!activePresetId}
+                    className="rounded-md border border-surface-600 px-2 text-surface-400 transition-colors hover:border-red-500 hover:text-red-300 disabled:cursor-not-allowed disabled:opacity-40"
+                    title="Delete selected preset"
+                  >
+                    <X size={16} />
+                  </button>
+                </div>
+              </div>
+              <div className="min-w-64 flex-1">
+                <label className="label">Preset Name</label>
+                <input
+                  className="input text-sm"
+                  value={presetName}
+                  onChange={e => setPresetName(e.target.value)}
+                  placeholder="e.g. Audio transcription sweep"
+                />
+              </div>
+              <button
+                onClick={() => saveCurrentPreset().catch(err => setPresetStatus(`Save failed: ${err.message ?? String(err)}`))}
+                className="btn-primary h-10"
+              >
+                Save Preset
+              </button>
+            </div>
+            <div className="flex flex-wrap items-center gap-3 text-xs text-surface-400">
+              <span>{selectedRows.length} selected model{selectedRows.length !== 1 ? 's' : ''}</span>
+              {presetStatus && <span className={presetStatus.includes('failed') || presetStatus.includes('not found') ? 'text-red-300' : 'text-brand-gold'}>{presetStatus}</span>}
+            </div>
+          </div>
 
           <div className="space-y-3">
             {enabledProviders.length === 0 ? (
@@ -1123,6 +1270,7 @@ export function RunTab() {
                         ) : (
                           displayModels.map((model: string) => {
                             const selected = isModelSelected(prov.id, model)
+                            const missing = !prov.models.includes(model)
                             const meta = prov.modelMetas?.find((m: any) => m.id === model)
                             const pricing = effectivePricing(prov, model)
                             const lozenges = modelLozenges(prov.name, model, meta, pricing)
@@ -1130,7 +1278,9 @@ export function RunTab() {
                               <div
                                 key={model}
                                 className={`rounded-lg border p-3 transition-all ${
-                                  selected
+                                  missing
+                                    ? 'bg-red-950/25 border-red-700/60'
+                                    : selected
                                     ? 'bg-brand-blue/10 border-brand-blue/40 hover:bg-brand-blue/20 dark:bg-brand-gold/10 dark:border-brand-gold/40'
                                     : 'bg-surface-850 border-surface-700 opacity-50 hover:opacity-80'
                                 }`}
@@ -1150,6 +1300,7 @@ export function RunTab() {
                                     )}
                                   </div>
                                   <div className="text-[10px] text-surface-500 space-y-0.5">
+                                    {missing && <p className="font-semibold text-red-300">Missing from provider model list</p>}
                                     {meta?.owned_by && <p>by {meta.owned_by}</p>}
                                     {meta?.context_length && <p>ctx: {(meta.context_length / 1000).toFixed(0)}k</p>}
                                   </div>
@@ -1199,6 +1350,42 @@ export function RunTab() {
                   </div>
                 )
               })
+            )}
+          </div>
+
+          <div className="card p-0 overflow-hidden">
+            <div className="border-b border-surface-700 px-4 py-3">
+              <h3 className="text-sm font-semibold text-surface-200">Selected Models</h3>
+              <p className="text-xs text-surface-500">Current working set from presets or manual selection.</p>
+            </div>
+            {selectedRows.length === 0 ? (
+              <div className="px-4 py-5 text-sm text-surface-500">No models selected.</div>
+            ) : (
+              <div className="max-h-72 overflow-y-auto">
+                <table className="w-full text-left text-xs">
+                  <thead className="sticky top-0 bg-surface-950 text-surface-400">
+                    <tr>
+                      <th className="px-4 py-2 font-medium">Provider</th>
+                      <th className="px-4 py-2 font-medium">Model</th>
+                      <th className="px-4 py-2 text-right font-medium">Input $/M</th>
+                      <th className="px-4 py-2 text-right font-medium">Output $/M</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {selectedRows.map(row => (
+                      <tr key={`${row.provider.id}:${row.model}`} className={`border-t border-surface-800 ${row.available ? 'text-surface-200' : 'bg-red-950/20 text-red-200'}`}>
+                        <td className="px-4 py-2">{row.provider.name}</td>
+                        <td className="px-4 py-2 font-mono">
+                          {row.model}
+                          {!row.available && <span className="ml-2 rounded border border-red-700/60 px-1.5 py-0.5 text-[10px] font-semibold text-red-300">missing</span>}
+                        </td>
+                        <td className="px-4 py-2 text-right font-mono">{row.pricing.input || 0}</td>
+                        <td className="px-4 py-2 text-right font-mono">{row.pricing.output || 0}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             )}
           </div>
 

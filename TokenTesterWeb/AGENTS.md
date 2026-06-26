@@ -14,6 +14,7 @@ This directory is the Vercel-deployable Next.js App Router port of the Token Tes
 - `src/components`: client UI tabs for configure, prompts, run, results, and navigation.
 - `src/lib/provider-api.ts`: server-side provider discovery and chat completion adapters.
 - `src/lib/pricing.ts`: Neon-backed model pricing reads and writes.
+- `src/lib/model-presets.ts`: Neon-backed model preset reads and writes.
 - `src/store.ts`: Zustand browser state and localStorage migrations.
 - `src/utils/constants.ts`: built-in provider presets.
 - `scripts`: Neon schema setup and pricing import utilities.
@@ -33,6 +34,7 @@ This directory is the Vercel-deployable Next.js App Router port of the Token Tes
 - Provider API keys must stay server-side in route handlers.
 - The browser may send an env var name such as `XAI_API_KEY`, but never the secret value.
 - Model pricing is sourced from Neon Postgres through `/api/pricing`.
+- Model presets are sourced from Neon Postgres through `/api/model-presets`.
 - Static pricing bundles are not used at runtime.
 - Manual price edits and fetched provider prices should be persisted through `PUT /api/pricing`.
 - Prices are stored as USD per 1M tokens.

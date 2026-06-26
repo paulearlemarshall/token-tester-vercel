@@ -6,6 +6,8 @@ import { formatFileSize, truncate } from '../utils/formatters'
 import type { AttachedFile, FileItem } from '../types'
 import { dataTransferToDroppedFiles, fileToAttached, isSupportedUpload } from '../lib/browser-files'
 
+const DEFAULT_AUDIO_PROMPT = 'Perform speech to text on this file'
+
 export function PromptsTab() {
   const {
     systemPrompt, setSystemPrompt,
@@ -49,6 +51,9 @@ export function PromptsTab() {
 
   function defaultPromptByType(t: string): string {
     const d = t === 'document' ? defaults.document : t === 'audio' ? defaults.audio : t === 'image' ? defaults.image : null
+    if (t === 'audio' && (!d?.text || d.text.toLowerCase().includes('document'))) {
+      return DEFAULT_AUDIO_PROMPT
+    }
     return d?.text ?? ''
   }
 
