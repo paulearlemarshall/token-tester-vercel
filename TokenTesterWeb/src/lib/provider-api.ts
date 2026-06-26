@@ -325,7 +325,7 @@ function buildOpenRouterMessages(input: NormalizedRunInput) {
     } else if (attachment.kind === 'audio' && attachment.base64) {
       content.push({
         type: 'input_audio',
-        inputAudio: {
+        input_audio: {
           data: attachment.base64,
           format: audioFormatForChatCompletion(attachment),
         },
