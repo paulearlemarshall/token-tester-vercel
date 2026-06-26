@@ -1,4 +1,5 @@
 import { getSql } from './db'
+import { nextLocalId, readLocalJson, shouldUseLocalPersistence, writeLocalJson } from './local-persistence'
 
 type FlatPricing = Record<string, { input: number; output: number; per: string }>
 
@@ -53,6 +54,7 @@ export interface DeletePriceRecordInput {
 }
 
 export async function getPricing() {
+  if (shouldUseLocalPersistence()) return getLocalPricing()
   const sql = getSql()
   const rows = await sql`
     with candidates as (
@@ -100,6 +102,7 @@ export async function getPricing() {
 }
 
 export async function getPricingRecords() {
+  if (shouldUseLocalPersistence()) return getLocalPricingRecords()
   const sql = getSql()
   const rows = await sql`
     with records as (
@@ -213,6 +216,19 @@ export async function upsertModelPrice(input: ModelPriceInput) {
     matchMethod: input.matchMethod ?? 'exact-id',
   })
 
+  if (shouldUseLocalPersistence()) {
+    return upsertLocalModelPrice({
+      ...input,
+      serviceProvider,
+      modelId,
+      upstreamProvider,
+      displayName,
+      source,
+      sourcePriority,
+      matchEvidence,
+    })
+  }
+
   const sql = getSql()
   await sql`
     insert into model_price_records (
@@ -310,6 +326,7 @@ export async function upsertModelPrice(input: ModelPriceInput) {
 }
 
 export async function deleteModelPriceRecord(input: DeletePriceRecordInput) {
+  if (shouldUseLocalPersistence()) return deleteLocalModelPriceRecord(input)
   const sql = getSql()
   let deleted: { service_provider: string; model_id: string }[] = []
 
@@ -481,6 +498,97 @@ function normalizeModelId(value: string) {
 function jsonOrNull(value: unknown) {
   if (value == null) return null
   return JSON.stringify(value)
+}
+
+async function getLocalPricing() {
+  const records = await readLocalJson<PriceRecord[]>('pricing-records.json', [])
+  const byKey = new Map<string, PriceRecord>()
+  for (const record of records) {
+    const current = byKey.get(record.key)
+    if (!current || record.sourcePriority > current.sourcePriority || record.updatedAt > current.updatedAt) {
+      byKey.set(record.key, record)
+    }
+  }
+  const pricing: FlatPricing = {}
+  for (const record of byKey.values()) {
+    pricing[record.key] = { input: record.input, output: record.output, per: '1M' }
+  }
+  return pricing
+}
+
+async function getLocalPricingRecords() {
+  const records = await readLocalJson<PriceRecord[]>('pricing-records.json', [])
+  const groups = new Map<string, { key: string; provider: string; model: string; effective: PriceRecord | null; records: PriceRecord[] }>()
+  for (const record of records.sort((a, b) => a.serviceProvider.localeCompare(b.serviceProvider) || a.modelId.localeCompare(b.modelId) || b.sourcePriority - a.sourcePriority)) {
+    const group = groups.get(record.key) ?? { key: record.key, provider: record.serviceProvider, model: record.modelId, effective: null, records: [] }
+    group.records.push(record)
+    if (!group.effective || record.sourcePriority > group.effective.sourcePriority || record.updatedAt > group.effective.updatedAt) {
+      group.effective = record
+    }
+    groups.set(record.key, group)
+  }
+  return { records: Array.from(groups.values()), generatedAt: new Date().toISOString() }
+}
+
+async function upsertLocalModelPrice(input: ModelPriceInput & {
+  serviceProvider: string
+  modelId: string
+  upstreamProvider: string | null
+  displayName: string | null
+  source: string
+  sourcePriority: number
+}) {
+  const records = await readLocalJson<PriceRecord[]>('pricing-records.json', [])
+  const now = new Date().toISOString()
+  const key = `${input.serviceProvider}/${input.modelId}`
+  const existingIndex = records.findIndex(record => record.serviceProvider === input.serviceProvider && record.modelId === input.modelId && record.source === input.source)
+  const existing = existingIndex >= 0 ? records[existingIndex] : null
+  const record: PriceRecord = {
+    id: existing?.id ?? nextLocalId(records),
+    key,
+    serviceProvider: input.serviceProvider,
+    modelId: input.modelId,
+    upstreamProvider: input.upstreamProvider,
+    displayName: input.displayName,
+    input: input.input,
+    output: input.output,
+    currency: 'USD',
+    source: input.source,
+    sourcePriority: input.sourcePriority,
+    sourceUrl: input.sourceUrl ?? null,
+    sourceUpdatedAt: input.sourceUpdatedAt ?? null,
+    rawSourcePayload: input.rawSourcePayload ?? null,
+    rawProviderPayload: input.rawProviderPayload ?? null,
+    matchStatus: input.matchStatus ?? 'matched',
+    matchConfidence: input.matchConfidence ?? null,
+    matchMethod: input.matchMethod ?? null,
+    matchEvidence: input.matchEvidence ?? null,
+    updatedAt: now,
+    lastSeenAt: now,
+  }
+  if (existingIndex >= 0) records[existingIndex] = record
+  else records.push(record)
+  await writeLocalJson('pricing-records.json', records)
+  return { key, price: { input: input.input, output: input.output, per: '1M' } }
+}
+
+async function deleteLocalModelPriceRecord(input: DeletePriceRecordInput) {
+  const records = await readLocalJson<PriceRecord[]>('pricing-records.json', [])
+  const serviceProvider = normalizeServiceProvider(input.serviceProvider ?? '')
+  const modelId = (input.modelId ?? '').trim()
+  const source = (input.source ?? '').trim()
+  const next = records.filter(record => {
+    if (Number.isFinite(input.id)) return record.id !== input.id
+    if (!serviceProvider || !modelId) return true
+    if (record.serviceProvider !== serviceProvider || record.modelId !== modelId) return true
+    return source ? record.source !== source : false
+  })
+  await writeLocalJson('pricing-records.json', next)
+  const deleted = records.length - next.length
+  return {
+    deleted,
+    keys: records.filter(record => !next.includes(record)).map(record => record.key),
+  }
 }
 
 function rowToPriceRecord(row: any): PriceRecord {

@@ -9,6 +9,7 @@ import { ModelsTab } from './ModelsTab'
 import { RunTab } from './RunTab'
 import { ResultsTab } from './ResultsTab'
 import { ResultsArchiveTab } from './ResultsArchiveTab'
+import { ModelStatsTab } from './ModelStatsTab'
 import { webApi } from '../lib/web-api'
 
 export function TokenTesterApp() {
@@ -49,6 +50,7 @@ export function TokenTesterApp() {
         {activeTab === 'run' && <RunTab />}
         {activeTab === 'results' && <ResultsTab />}
         {activeTab === 'archive' && <ResultsArchiveTab />}
+        {activeTab === 'modelStats' && <ModelStatsTab />}
       </main>
     </div>
   )

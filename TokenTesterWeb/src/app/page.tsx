@@ -1,5 +1,5 @@
-import { TokenTesterApp } from "@/components/TokenTesterApp";
+import { TokenTesterClient } from '@/components/TokenTesterClient'
 
 export default function Home() {
-  return <TokenTesterApp />;
+  return <TokenTesterClient />
 }

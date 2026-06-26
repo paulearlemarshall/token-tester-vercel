@@ -1,4 +1,5 @@
 import { getSql } from './db'
+import { nextLocalId, readLocalJson, shouldUseLocalPersistence, writeLocalJson } from './local-persistence'
 import { normalizeServiceProvider } from './pricing'
 
 export interface RunResultInput {
@@ -42,6 +43,9 @@ export interface RunResultInput {
   estimatedCost?: number | null
   responseText?: string
   error?: string
+  documentCategory?: string | null
+  documentCategoryConfidence?: number | null
+  documentCategorySource?: string | null
   requestPayload?: unknown
   responsePayload?: unknown
   runStartedAt?: string | number | Date | null
@@ -96,6 +100,9 @@ async function ensureRunResultsSchema() {
       estimated_cost numeric(18, 9),
       response_text text,
       error text,
+      document_category text,
+      document_category_confidence numeric(5, 4),
+      document_category_source text,
       request_payload jsonb,
       response_payload jsonb,
       suppressed boolean not null default false,
@@ -115,6 +122,9 @@ async function ensureRunResultsSchema() {
   await sql`alter table run_results add column if not exists video_file_size bigint`
   await sql`alter table run_results add column if not exists audio_sent boolean not null default false`
   await sql`alter table run_results add column if not exists audio_file_size bigint`
+  await sql`alter table run_results add column if not exists document_category text`
+  await sql`alter table run_results add column if not exists document_category_confidence numeric(5, 4)`
+  await sql`alter table run_results add column if not exists document_category_source text`
   await sql`
     update run_results
     set record_key = concat_ws('|', service_provider, model, input_hash)
@@ -136,6 +146,7 @@ export async function saveRunResult(input: RunResultInput) {
   if (!input.runId || !input.providerName || !input.model || !input.inputHash) {
     throw new Error('runId, providerName, model, and inputHash are required')
   }
+  if (shouldUseLocalPersistence()) return saveLocalRunResult(input)
 
   await ensureRunResultsSchema()
   const sql = getSql()
@@ -186,6 +197,9 @@ export async function saveRunResult(input: RunResultInput) {
       estimated_cost,
       response_text,
       error,
+      document_category,
+      document_category_confidence,
+      document_category_source,
       request_payload,
       response_payload,
       suppressed,
@@ -234,6 +248,9 @@ export async function saveRunResult(input: RunResultInput) {
       ${input.estimatedCost ?? null},
       ${input.responseText ?? ''},
       ${input.error ?? null},
+      ${input.documentCategory ?? null},
+      ${input.documentCategoryConfidence ?? null},
+      ${input.documentCategorySource ?? null},
       ${jsonOrNull(input.requestPayload)}::jsonb,
       ${jsonOrNull(input.responsePayload)}::jsonb,
       false,
@@ -281,6 +298,9 @@ export async function saveRunResult(input: RunResultInput) {
       estimated_cost = excluded.estimated_cost,
       response_text = excluded.response_text,
       error = excluded.error,
+      document_category = excluded.document_category,
+      document_category_confidence = excluded.document_category_confidence,
+      document_category_source = excluded.document_category_source,
       request_payload = excluded.request_payload,
       response_payload = excluded.response_payload,
       suppressed = excluded.suppressed,
@@ -293,6 +313,7 @@ export async function saveRunResult(input: RunResultInput) {
 }
 
 export async function getRunResults(limit = 1000) {
+  if (shouldUseLocalPersistence()) return getLocalRunResults(limit)
   await ensureRunResultsSchema()
   const sql = getSql()
   const safeLimit = Math.min(Math.max(Math.trunc(limit) || 1000, 1), 5000)
@@ -339,6 +360,9 @@ export async function getRunResults(limit = 1000) {
       estimated_cost,
       response_text,
       error,
+      document_category,
+      document_category_confidence,
+      document_category_source,
       request_payload,
       response_payload,
       suppressed,
@@ -358,6 +382,7 @@ export async function getRunResults(limit = 1000) {
 }
 
 export async function updateRunResultsSuppressed(ids: number[], suppressed: boolean) {
+  if (shouldUseLocalPersistence()) return updateLocalRunResultsSuppressed(ids, suppressed)
   await ensureRunResultsSchema()
   const normalizedIds = normalizeIds(ids)
   if (normalizedIds.length === 0) return { updated: 0 }
@@ -372,6 +397,7 @@ export async function updateRunResultsSuppressed(ids: number[], suppressed: bool
 }
 
 export async function deleteRunResults(ids: number[]) {
+  if (shouldUseLocalPersistence()) return deleteLocalRunResults(ids)
   await ensureRunResultsSchema()
   const normalizedIds = normalizeIds(ids)
   if (normalizedIds.length === 0) return { deleted: 0 }
@@ -427,6 +453,9 @@ function rowToRunResult(row: any) {
     estimatedCost: row.estimated_cost == null ? null : Number(row.estimated_cost),
     responseText: row.response_text,
     error: row.error,
+    documentCategory: row.document_category,
+    documentCategoryConfidence: row.document_category_confidence == null ? null : Number(row.document_category_confidence),
+    documentCategorySource: row.document_category_source,
     requestPayload: row.request_payload,
     responsePayload: row.response_payload,
     suppressed: Boolean(row.suppressed),
@@ -445,4 +474,104 @@ function normalizeIds(ids: number[]) {
   return [...new Set((ids ?? [])
     .map(id => Number(id))
     .filter(id => Number.isSafeInteger(id) && id > 0))]
+}
+
+async function saveLocalRunResult(input: RunResultInput) {
+  const rows = await readLocalJson<any[]>('run-results.json', [])
+  const serviceProvider = normalizeServiceProvider(input.serviceProvider || input.providerName)
+  const completedAt = input.completedAt ? new Date(input.completedAt).toISOString() : new Date().toISOString()
+  const now = new Date().toISOString()
+  const existingIndex = rows.findIndex(row => row.runId === input.runId)
+  const existing = existingIndex >= 0 ? rows[existingIndex] : null
+  const row = {
+    id: existing?.id ?? nextLocalId(rows),
+    runId: input.runId,
+    recordKey: input.recordKey || `${serviceProvider}|${input.model}|${input.inputHash}`,
+    status: input.status,
+    providerId: input.providerId ?? null,
+    providerName: input.providerName,
+    serviceProvider,
+    model: input.model,
+    sourceType: input.sourceType,
+    sourceLabel: input.sourceLabel,
+    systemPrompt: input.systemPrompt ?? '',
+    systemPromptHash: input.systemPromptHash ?? null,
+    userMessage: input.userMessage ?? '',
+    userMessageHash: input.userMessageHash ?? null,
+    inputHash: input.inputHash,
+    fileName: input.fileName ?? null,
+    filePath: input.filePath ?? null,
+    fileSize: input.fileSize ?? null,
+    fileType: input.fileType ?? null,
+    fileMimeType: input.fileMimeType ?? null,
+    fileHash: input.fileHash ?? null,
+    fileMetadata: input.fileMetadata ?? null,
+    batchFiles: input.batchFiles ?? null,
+    pdfSent: input.pdfSent ?? false,
+    pdfFileSize: input.pdfFileSize ?? null,
+    imageSent: input.imageSent ?? false,
+    imageFileSize: input.imageFileSize ?? null,
+    videoSent: input.videoSent ?? false,
+    videoFileSize: input.videoFileSize ?? null,
+    audioSent: input.audioSent ?? false,
+    audioFileSize: input.audioFileSize ?? null,
+    inputTokens: input.inputTokens ?? 0,
+    outputTokens: input.outputTokens ?? 0,
+    totalTokens: input.totalTokens ?? 0,
+    localInputTokens: input.localInputTokens ?? null,
+    latencyMs: input.latencyMs ?? 0,
+    inputPricePer1m: input.inputPricePer1m ?? null,
+    outputPricePer1m: input.outputPricePer1m ?? null,
+    estimatedCost: input.estimatedCost ?? null,
+    responseText: input.responseText ?? '',
+    error: input.error ?? null,
+    documentCategory: input.documentCategory ?? null,
+    documentCategoryConfidence: input.documentCategoryConfidence ?? null,
+    documentCategorySource: input.documentCategorySource ?? null,
+    requestPayload: input.requestPayload ?? null,
+    responsePayload: input.responsePayload ?? null,
+    suppressed: existing?.suppressed ?? false,
+    runStartedAt: input.runStartedAt ? new Date(input.runStartedAt).toISOString() : null,
+    completedAt,
+    createdAt: existing?.createdAt ?? now,
+    updatedAt: now,
+  }
+  if (existingIndex >= 0) rows[existingIndex] = row
+  else rows.push(row)
+  await writeLocalJson('run-results.json', rows)
+  return { ok: true }
+}
+
+async function getLocalRunResults(limit = 1000) {
+  const safeLimit = Math.min(Math.max(Math.trunc(limit) || 1000, 1), 5000)
+  const rows = await readLocalJson<any[]>('run-results.json', [])
+  return {
+    records: rows.sort((a, b) => String(b.completedAt).localeCompare(String(a.completedAt))).slice(0, safeLimit),
+    generatedAt: new Date().toISOString(),
+  }
+}
+
+async function updateLocalRunResultsSuppressed(ids: number[], suppressed: boolean) {
+  const normalizedIds = normalizeIds(ids)
+  if (normalizedIds.length === 0) return { updated: 0 }
+  const idSet = new Set(normalizedIds)
+  const rows = await readLocalJson<any[]>('run-results.json', [])
+  let updated = 0
+  const next = rows.map(row => {
+    if (!idSet.has(Number(row.id))) return row
+    updated++
+    return { ...row, suppressed, updatedAt: new Date().toISOString() }
+  })
+  await writeLocalJson('run-results.json', next)
+  return { updated }
+}
+
+async function deleteLocalRunResults(ids: number[]) {
+  const normalizedIds = normalizeIds(ids)
+  if (normalizedIds.length === 0) return { deleted: 0 }
+  const idSet = new Set(normalizedIds)
+  const rows = await readLocalJson<any[]>('run-results.json', [])
+  const next = rows.filter(row => !idSet.has(Number(row.id)))
+  await writeLocalJson('run-results.json', next)
+  return { deleted: rows.length - next.length }
 }

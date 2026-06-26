@@ -1,53 +1,19 @@
 import { useEffect, useState, type ReactNode } from 'react'
-import { ArrowDown, ArrowUp, ChevronDown, ChevronRight, Search, ToggleLeft, ToggleRight, X } from 'lucide-react'
+import { ArrowDown, ArrowUp, ChevronDown, ChevronRight, DollarSign, Search, ToggleLeft, ToggleRight, X } from 'lucide-react'
 import { useStore } from '../store'
 import type { ModelPreset, ModelPresetModel, ProviderConfig } from '../types'
 import { webApi } from '../lib/web-api'
 import { canonicalProviderKey, effectivePricing as resolveEffectivePricing, type ProviderKeyInput } from '../lib/provider-key'
 import { getAttachmentCapabilities, getProviderAdapter } from '../lib/provider-registry'
+import { CAPABILITY_LABELS, CAPABILITY_STYLES, inferModelCapabilities, type ModelCapability } from '../utils/model-capabilities'
 
 type SelectedModelSortField = 'provider' | 'model' | 'input' | 'output'
-type ProviderModelSort = 'active' | 'name-asc' | 'name-desc' | 'input-asc' | 'input-desc' | 'output-asc' | 'output-desc'
+type ProviderModelSort = 'active' | 'name-asc' | 'name-desc' | 'input-asc' | 'input-desc' | 'output-asc' | 'output-desc' | 'price-asc' | 'price-desc'
 type SelectedModelRow = {
   provider: ProviderConfig
   model: string
   available: boolean
   pricing: { input: number; output: number }
-}
-
-function modelLozenges(providerName: string, modelId: string, meta: any, pricing: { input: number; output: number }) {
-  const id = modelId.toLowerCase()
-  const provider = providerName.toLowerCase()
-  const tags: { label: string; tone: 'blue' | 'gold' | 'slate' | 'green' }[] = []
-  const add = (label: string, tone: 'blue' | 'gold' | 'slate' | 'green' = 'slate') => {
-    if (!tags.some(t => t.label === label)) tags.push({ label, tone })
-  }
-
-  if (meta?.modality?.includes('image') || /vision|image|vl|omni|gpt-4o|gemini/.test(id)) add('Vision', 'gold')
-  if (/code|coder|coding|codestral|devstral|grok-build|deepseek-coder|qwen.*coder/.test(id)) add('Coding', 'blue')
-  if (/reason|thinking|r1|o\d|grok-4|sonnet|opus/.test(id)) add('Reasoning', 'gold')
-  if (/mini|small|haiku|flash|fast|instant|lite|8b|7b/.test(id)) add('Fast', 'green')
-  if (/cheap|free|mini|small|haiku|flash|lite/.test(id) || (pricing.input > 0 && pricing.output > 0 && pricing.input <= 1 && pricing.output <= 3)) add('Low cost', 'green')
-  if ((meta?.context_length ?? 0) >= 128000 || /128k|200k|256k|1m|long/.test(id)) add('Long ctx', 'blue')
-  if (/embed/.test(id)) add('Embeddings', 'slate')
-  if (/image|imagine|dall|stable|flux/.test(id)) add('Image gen', 'gold')
-  if (provider.includes('openrouter') && id.includes('/')) add('Routed', 'slate')
-  if (tags.length === 0) add('General', 'slate')
-
-  return tags.slice(0, 4)
-}
-
-function lozengeClass(tone: 'blue' | 'gold' | 'slate' | 'green') {
-  switch (tone) {
-    case 'blue':
-      return 'border-brand-blue/35 bg-brand-blue/10 text-brand-blue dark:border-brand-blue/50 dark:bg-brand-blue/15 dark:text-surface-100'
-    case 'gold':
-      return 'border-brand-gold/45 bg-brand-gold/15 text-brand-charcoal dark:text-brand-gold'
-    case 'green':
-      return 'border-emerald-700/30 bg-emerald-700/10 text-emerald-800 dark:border-emerald-400/30 dark:bg-emerald-400/10 dark:text-emerald-300'
-    default:
-      return 'border-surface-600 bg-surface-800 text-surface-400'
-  }
 }
 
 function usesCompletionTokensParam(model: string): boolean {
@@ -172,6 +138,7 @@ export function ModelsTab() {
   const [expandedProv, setExpandedProv] = useState<Set<string>>(new Set())
   const [searches, setSearches] = useState<Record<string, string>>({})
   const [modalityFilters, setModalityFilters] = useState<Record<string, string | null>>({})
+  const [capabilityFilters, setCapabilityFilters] = useState<Record<string, ModelCapability[] | ModelCapability | null>>({})
   const [sortModes, setSortModes] = useState<Record<string, ProviderModelSort>>({})
   const [handlingProvider, setHandlingProvider] = useState<ProviderConfig | null>(null)
   const [modelPresets, setModelPresets] = useState<ModelPreset[]>([])
@@ -221,6 +188,27 @@ export function ModelsTab() {
 
   function effectivePricing(provider: ProviderKeyInput | string, modelId: string): { input: number; output: number } {
     return resolveEffectivePricing(provider, modelId, modelPricing, builtinPricing)
+  }
+
+  function modelCapabilities(provider: ProviderConfig, model: string): ModelCapability[] {
+    const meta = provider.modelMetas?.find((m: any) => m.id === model)
+    return inferModelCapabilities(model, meta, effectivePricing(provider, model))
+  }
+
+  function normalizedCapabilityFilter(providerId: string): ModelCapability[] {
+    const value = capabilityFilters[providerId]
+    if (!value) return []
+    return Array.isArray(value) ? value : [value]
+  }
+
+  function toggleCapabilityFilter(providerId: string, capability: ModelCapability) {
+    setCapabilityFilters(current => {
+      const active = normalizedCapabilityFilter(providerId)
+      const next = active.includes(capability)
+        ? active.filter(item => item !== capability)
+        : [...active, capability]
+      return { ...current, [providerId]: next }
+    })
   }
 
   function selectedModelRows(): SelectedModelRow[] {
@@ -327,6 +315,13 @@ export function ModelsTab() {
     })
   }
 
+  function togglePriceSort(providerId: string) {
+    setSortModes(s => {
+      const cur = s[providerId] || 'name-asc'
+      return { ...s, [providerId]: cur === 'price-asc' ? 'price-desc' : 'price-asc' }
+    })
+  }
+
   function sortedModels(providerId: string, provider: ProviderKeyInput, models: string[]): string[] {
     const sort = sortModes[provider.name ?? providerId] || 'name-asc'
     if (sort === 'active') {
@@ -337,11 +332,16 @@ export function ModelsTab() {
         return a.localeCompare(b)
       })
     }
-    const [field, dir] = sort.split('-') as ['name' | 'input' | 'output', 'asc' | 'desc']
+    const [field, dir] = sort.split('-') as ['name' | 'input' | 'output' | 'price', 'asc' | 'desc']
     const sign = dir === 'asc' ? 1 : -1
     return [...models].sort((a, b) => {
       if (field === 'input') return (effectivePricing(provider, a).input - effectivePricing(provider, b).input) * sign
       if (field === 'output') return (effectivePricing(provider, a).output - effectivePricing(provider, b).output) * sign
+      if (field === 'price') {
+        const aPrice = effectivePricing(provider, a)
+        const bPrice = effectivePricing(provider, b)
+        return ((aPrice.input + aPrice.output) - (bPrice.input + bPrice.output)) * sign
+      }
       return a.localeCompare(b) * sign
     })
   }
@@ -364,6 +364,16 @@ export function ModelsTab() {
         return m.modality?.includes(modality)
       }).map((m: any) => m.id))
       list = list.filter(m => modModelIds.has(m) || scopedMissing.includes(m))
+    }
+    const activeCapabilities = normalizedCapabilityFilter(providerId)
+    if (activeCapabilities.length > 0) {
+      const prov = config.providers.find((p: ProviderConfig) => p.id === providerId)
+      if (prov) {
+        list = list.filter(model => {
+          const caps = modelCapabilities(prov, model)
+          return activeCapabilities.some(cap => caps.includes(cap))
+        })
+      }
     }
     return list
   }
@@ -480,6 +490,12 @@ export function ModelsTab() {
             const selectedCount = getSelectedModels(prov.id, prov.models).length
             const isExpanded = expandedProv.has(prov.id)
             const search = searches[prov.id] || ''
+            const scopedMissing = Object.entries(modelScope[prov.id] ?? {})
+              .filter(([model, selected]) => selected && !prov.models.includes(model))
+              .map(([model]) => model)
+            const totalVisibleSourceModels = Array.from(new Set([...prov.models, ...scopedMissing]))
+            const availableCapabilities = Array.from(new Set(totalVisibleSourceModels.flatMap(model => modelCapabilities(prov, model))))
+            const activeCapabilities = normalizedCapabilityFilter(prov.id)
             const displayModels = sortedModels(prov.id, prov, filteredModels(prov.id, prov.models))
             return (
               <div key={prov.id} className="card p-0 overflow-hidden">
@@ -537,6 +553,17 @@ export function ModelsTab() {
                           )
                         })()}
                       </button>
+                      <button
+                        onClick={e => { e.stopPropagation(); togglePriceSort(prov.name) }}
+                        className={`rounded-md border px-1.5 py-1 transition-colors ${
+                          (sortModes[prov.name] || '').startsWith('price')
+                            ? 'border-brand-gold/45 bg-brand-gold/10 text-brand-gold'
+                            : 'border-surface-700 text-surface-400 hover:border-surface-500 hover:text-surface-200'
+                        }`}
+                        title={`Price sort: ${sortModes[prov.name] === 'price-asc' ? 'ascending' : sortModes[prov.name] === 'price-desc' ? 'descending' : 'off'}`}
+                      >
+                        <DollarSign size={13} />
+                      </button>
                       {(() => {
                         const filters = new Map<string, string>()
                         for (const m of (prov.modelMetas || [])) {
@@ -588,17 +615,41 @@ export function ModelsTab() {
                 </div>
 
                 {isExpanded && (
-                  <div className="border-t border-surface-700 p-3 grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2 max-h-80 overflow-y-auto">
-                    {displayModels.length === 0 ? (
-                      <div className="col-span-full text-center py-4 text-xs text-surface-500">No models match "{search}"</div>
-                    ) : (
-                      displayModels.map((model: string) => {
-                        const selected = isModelSelected(prov.id, model)
-                        const missing = !prov.models.includes(model)
-                        const meta = prov.modelMetas?.find((m: any) => m.id === model)
-                        const pricing = effectivePricing(prov, model)
-                        const lozenges = modelLozenges(prov.name, model, meta, pricing)
-                        return (
+                  <div className="border-t border-surface-700">
+                    <div className="space-y-2 border-b border-surface-800 px-3 py-3">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="text-xs font-medium text-surface-400">Good for</span>
+                        {availableCapabilities.map(cap => {
+                          const active = activeCapabilities.includes(cap)
+                          return (
+                            <button
+                              key={cap}
+                              type="button"
+                              onClick={() => toggleCapabilityFilter(prov.id, cap)}
+                              className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold transition-colors ${
+                                active ? CAPABILITY_STYLES[cap] : 'border-surface-700 bg-transparent text-surface-500 hover:border-surface-500 hover:text-surface-300'
+                              }`}
+                            >
+                              {CAPABILITY_LABELS[cap]}
+                            </button>
+                          )
+                        })}
+                      </div>
+                      <div className="text-[10px] text-surface-500">
+                        {displayModels.length} of {totalVisibleSourceModels.length} showing · inferred guidance
+                      </div>
+                    </div>
+                    <div className="p-3 grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2 max-h-80 overflow-y-auto">
+                      {displayModels.length === 0 ? (
+                        <div className="col-span-full text-center py-4 text-xs text-surface-500">No models match "{search}"</div>
+                      ) : (
+                        displayModels.map((model: string) => {
+                          const selected = isModelSelected(prov.id, model)
+                          const missing = !prov.models.includes(model)
+                          const meta = prov.modelMetas?.find((m: any) => m.id === model)
+                          const pricing = effectivePricing(prov, model)
+                          const capabilities = modelCapabilities(prov, model)
+                          return (
                           <div
                             key={model}
                             className={`rounded-lg border p-3 transition-all ${
@@ -629,12 +680,12 @@ export function ModelsTab() {
                                 {meta?.context_length && <p>ctx: {(meta.context_length / 1000).toFixed(0)}k</p>}
                               </div>
                               <div className="mt-2 flex flex-wrap gap-1">
-                                {lozenges.map(tag => (
+                                {capabilities.map(cap => (
                                   <span
-                                    key={tag.label}
-                                    className={`rounded-full border px-1.5 py-0.5 text-[9px] font-semibold leading-none ${lozengeClass(tag.tone)}`}
+                                    key={cap}
+                                    className={`rounded-full border px-1.5 py-0.5 text-[9px] font-semibold leading-none ${CAPABILITY_STYLES[cap]}`}
                                   >
-                                    {tag.label}
+                                    {CAPABILITY_LABELS[cap]}
                                   </span>
                                 ))}
                               </div>
@@ -669,6 +720,7 @@ export function ModelsTab() {
                         )
                       })
                     )}
+                    </div>
                   </div>
                 )}
               </div>

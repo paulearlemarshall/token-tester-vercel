@@ -9,6 +9,7 @@ const NAV: { id: TabId; label: string; icon: typeof Settings }[] = [
   { id: 'run', label: 'Run', icon: Play },
   { id: 'results', label: 'Results', icon: BarChart3 },
   { id: 'archive', label: 'Results Archive', icon: Archive },
+  { id: 'modelStats', label: 'Model Stats', icon: BarChart3 },
 ]
 
 export function Sidebar({ activeTab, onSelect }: { activeTab: TabId; onSelect: (t: TabId) => void }) {

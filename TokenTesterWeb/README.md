@@ -18,13 +18,16 @@ https://token-tester-web.vercel.app
 - Queue prompt, file, folder, single-file, and batch-file tests across many providers and models.
 - Save, load, overwrite, and delete DB-backed model presets for repeat provider/model working sets.
 - Show the active selected model set with provider, model, input price, output price, and missing-model warnings.
+- Show inferred model capability pills and multi-select Good for filters on the Models tab.
 - Preserve completed queue rows when adding more models.
 - Skip unsupported file/provider combinations without retrying fake placeholder content.
 - Run text, image, PDF, DOCX, audio, video, and batch-file workloads where provider adapters support them.
 - Default audio-only file runs use a speech-to-text prompt unless the user supplies a custom prompt.
 - Track local token estimates, provider token usage, latency, output text, errors, and estimated cost.
 - Persist every completed run to Neon with checksums, timestamps, provider metadata, payloads, and pricing context.
+- Categorize archived documents with OpenAI when `OPENAI_API_KEY` is present, with heuristic fallback.
 - Slice archived observations by provider, model, status, source, file, prompt, checksum, suppression state, and date.
+- Analyze archived runs in Model Stats by provider, model, category, and document type.
 - Export archive data to XLS.
 - Inspect provider-specific request handling from the Models tab.
 
@@ -35,6 +38,7 @@ https://token-tester-web.vercel.app
 - Styling: Tailwind CSS `4`.
 - State: Zustand, persisted to browser `localStorage`.
 - Database: Neon Postgres through `@neondatabase/serverless`.
+- Local fallback: JSON files in `.local-data/` when `DATABASE_URL` is not configured.
 - Token estimation: `gpt-tokenizer`.
 - Charts: Recharts.
 - Spreadsheet export: `xlsx`.
@@ -52,6 +56,7 @@ src/components/ModelsTab.tsx             Model presets, provider model selection
 src/components/RunTab.tsx                Queue generation, execution, retries, output inspection
 src/components/ResultsTab.tsx            Current in-memory run results, charts, exports
 src/components/ResultsArchiveTab.tsx     Persisted archive filters, tables, charts, XLS export
+src/components/ModelStatsTab.tsx         Archive-derived model/category performance statistics
 src/components/PricingNavigator.tsx      Pricing records, effective prices, evidence
 src/components/layout/Sidebar.tsx        Left navigation
 src/lib/provider-api.ts                  Server-side provider discovery and request adapters
@@ -61,6 +66,9 @@ src/lib/browser-files.ts                 Browser-side file parsing
 src/lib/pricing.ts                       Neon pricing reads/writes
 src/lib/pricing-match.ts                 Canonical pricing lookup and fallback matching
 src/lib/run-results.ts                   Neon Results Archive schema and persistence
+src/lib/model-stats.ts                   Archive grouping and derived model statistics
+src/lib/document-category.ts             Document category validation and heuristic classification
+src/lib/local-persistence.ts             File-backed local persistence fallback
 src/lib/web-api.ts                       Browser wrappers for app API routes
 src/types.ts                             Shared TypeScript types
 scripts/setup-pricing-db.mjs             Database setup and schema repair
@@ -129,6 +137,8 @@ It supports:
 - DB-backed model presets, with save-by-name overwrite and delete.
 - Provider/model search and selection.
 - Provider model sorting by active state, name, input price, and output price.
+- Compact price sorting by combined input and output price.
+- Multi-select Good for capability filters based on inferred model capabilities.
 - Provider modality filters where provider discovery exposes modality metadata.
 - Per-model price editing.
 - A sortable selected-models table showing provider, model, input price, and output price.
@@ -212,6 +222,18 @@ Suppression behavior:
 - Delete is permanent and requires confirmation.
 
 Archive XLS export includes the filtered/sorted rows and preserves the stored data fields, including IDs, hashes, prompt text, file metadata, media payload flags and sizes, token counts, latency, pricing, output text, errors, request payload, response payload, timestamps, and suppression state.
+
+### Model Stats
+
+The Model Stats tab loads up to 5000 archive records and groups unsuppressed rows by provider, model, document type, and document category.
+
+It supports:
+
+- Summary metrics for grouped runs, average success, and total cost.
+- Search plus provider, model, category, and document-type filters.
+- Sortable columns for all displayed metrics.
+- Category confidence displayed inline, such as `Invoice (87%)`.
+- Relative last-run labels with exact timestamp on hover.
 
 ## Provider Support
 
@@ -523,6 +545,9 @@ run_results (
   estimated_cost numeric(18, 9),
   response_text text,
   error text,
+  document_category text,
+  document_category_confidence numeric(5, 4),
+  document_category_source text,
   request_payload jsonb,
   response_payload jsonb,
   suppressed boolean not null default false,
@@ -604,6 +629,10 @@ Suppresses or restores selected archive records.
 
 Permanently deletes selected archive records.
 
+### `POST /api/document-category`
+
+Classifies document category metadata for archive records. Uses OpenAI Responses API when `OPENAI_API_KEY` is set, otherwise returns heuristic classification.
+
 ## Environment Variables
 
 Required database variable:
@@ -616,6 +645,7 @@ Provider keys:
 
 ```env
 OPENAI_API_KEY=
+DOCUMENT_CATEGORY_MODEL=
 OPENROUTER_API_KEY=
 SSC_CLOUD_API_KEY=
 ANTHROPIC_API_KEY=
@@ -631,6 +661,8 @@ Local setup:
 vercel link
 vercel env pull .env.local
 ```
+
+`DOCUMENT_CATEGORY_MODEL` is optional and defaults to `gpt-4o-mini`. `OPENAI_API_KEY` enables AI-assisted document categorization; without it, the app uses heuristic categorization.
 
 Vercel environments should have the same provider keys when Production, Preview, and Development need the same provider behavior.
 
@@ -722,6 +754,8 @@ Build Command: npm run build
 Output Directory: default
 ```
 
+If a deployed site shows a Vercel 404, check the Root Directory setting first.
+
 Deploy from local:
 
 ```powershell
@@ -781,6 +815,7 @@ Useful xAI model route test:
 
 - Vercel Git builds must run from `TokenTesterWeb`.
 - The app is intended to be Vercel-only.
+- Local testing can run without `DATABASE_URL`; server persistence uses `.local-data/`.
 - Provider API keys should be set in Vercel environment variables and pulled locally through `vercel env pull`.
 - Browser state stores provider configuration and selected models, but not secret provider keys.
 - The Results Archive is the source of truth for historical runs.

@@ -1,6 +1,6 @@
 # Token Tester Web
 
-Token Tester Web is the Vercel-only Next.js app for comparing AI model behavior across providers. It runs prompt and file tests, records response text, token usage, latency, estimated cost, provider request details, and keeps a persistent searchable Results Archive in Neon Postgres.
+Token Tester Web is the Vercel-only Next.js app for comparing AI model behavior across providers. It runs prompt and file tests, records response text, token usage, latency, estimated cost, provider request details, and keeps a searchable Results Archive in Neon Postgres or local `.local-data/` storage when `DATABASE_URL` is not configured.
 
 Production app:
 
@@ -27,6 +27,8 @@ Vercel must use `TokenTesterWeb` as the project Root Directory.
 - Preserves completed queue results when more models are added.
 - Archives every completed observation with hashes, timestamps, payloads, tokens, latency, price, and output.
 - Provides a Results Archive with filters, grouped views, charts, suppression, deletion, column sorting, column reordering, and XLS export.
+- Categorizes archived documents with OpenAI when configured, with heuristic fallback.
+- Provides Model Stats grouped by provider, model, document type, and category.
 - Shows provider-specific handling rules so users can see how each provider receives files, prompts, images, PDFs, and API parameters.
 
 ## Quick Start
@@ -39,6 +41,8 @@ vercel env pull .env.local
 npm run db:setup
 npm run dev
 ```
+
+For local-only testing without Neon, leave `DATABASE_URL` blank; the app writes JSON files under `TokenTesterWeb/.local-data/`.
 
 Open:
 

@@ -1,5 +1,6 @@
 import { encode } from 'gpt-tokenizer'
 import type { ModelPresetModel } from '../types'
+import type { DocumentCategoryInput, DocumentCategoryResult } from './document-category'
 import type { ChatParams, ModelFetchParams } from './provider-api'
 
 async function sendJson<T>(url: string, payload: unknown, method = 'POST'): Promise<T> {
@@ -54,6 +55,10 @@ export const webApi = {
 
   deleteModelPreset(id: number) {
     return sendJson<any>('/api/model-presets', { id }, 'DELETE')
+  },
+
+  classifyDocumentCategory(params: DocumentCategoryInput) {
+    return sendJson<DocumentCategoryResult>('/api/document-category', params)
   },
 
   saveArchivedResult(params: unknown) {

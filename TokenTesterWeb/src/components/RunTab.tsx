@@ -349,6 +349,15 @@ export function RunTab() {
         : { ...effectivePricing(run.providerName, run.model), per: '1M' }
       const serviceProvider = canonicalProviderKey(run.providerName)
       const recordKey = `${serviceProvider}|${run.model}|${inputHash}`
+      const category = await webApi.classifyDocumentCategory({
+        fileName: run.file?.name ?? (run.batchFiles ? `batch (${run.batchFiles.length})` : null),
+        filePath: run.file?.path ?? null,
+        sourceLabel: run.sourceLabel,
+        userMessage: run.userMessage,
+        responseText: result.responseText,
+        metadata: run.file?.metadata ?? null,
+        fileContent: files.map(file => file.content || '').filter(Boolean).join('\n\n').slice(0, 6000),
+      }).catch(() => null)
 
       await webApi.saveArchivedResult({
         runId: `${run.id}:${crypto.randomUUID()}`,
@@ -391,6 +400,9 @@ export function RunTab() {
         estimatedCost: estimateCost(result.inputTokens, result.outputTokens, rate),
         responseText: result.responseText,
         error: result.error,
+        documentCategory: category?.category ?? null,
+        documentCategoryConfidence: category?.confidence ?? null,
+        documentCategorySource: category?.source ?? null,
         requestPayload: result.requestPayload,
         responsePayload: result,
         runStartedAt: run.timestamp,

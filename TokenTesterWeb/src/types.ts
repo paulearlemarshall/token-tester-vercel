@@ -119,7 +119,7 @@ export interface TestRun {
   preview?: RunPreviewInfo
 }
 
-export type TabId = 'configure' | 'prompts' | 'models' | 'run' | 'results' | 'archive'
+export type TabId = 'configure' | 'prompts' | 'models' | 'run' | 'results' | 'archive' | 'modelStats'
 
 export type ThemeMode = 'system' | 'light' | 'dark'
 
@@ -189,6 +189,9 @@ export interface ArchivedRunResult {
   estimatedCost?: number | null
   responseText?: string | null
   error?: string | null
+  documentCategory?: string | null
+  documentCategoryConfidence?: number | null
+  documentCategorySource?: string | null
   requestPayload?: unknown
   responsePayload?: unknown
   suppressed: boolean

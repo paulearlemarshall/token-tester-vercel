@@ -1,4 +1,5 @@
 import { getSql } from './db'
+import { nextLocalId, readLocalJson, shouldUseLocalPersistence, writeLocalJson } from './local-persistence'
 
 export interface FilePrompt {
   id: number
@@ -118,6 +119,7 @@ async function ensureDefaultUniqueness(sql: any, type: string, excludeId?: numbe
 }
 
 export async function listFilePrompts(): Promise<FilePrompt[]> {
+  if (shouldUseLocalPersistence()) return listLocalFilePrompts()
   await ensureSchema()
   await seedDefaultsIfEmpty()
   await ensureAudioDefault()
@@ -131,6 +133,7 @@ export async function listFilePrompts(): Promise<FilePrompt[]> {
 }
 
 export async function getDefaults(): Promise<FilePromptDefaults> {
+  if (shouldUseLocalPersistence()) return getLocalDefaults()
   await ensureSchema()
   await seedDefaultsIfEmpty()
   await ensureAudioDefault()
@@ -148,6 +151,7 @@ export async function getDefaults(): Promise<FilePromptDefaults> {
 }
 
 export async function createFilePrompt(input: FilePromptInput): Promise<FilePrompt> {
+  if (shouldUseLocalPersistence()) return createLocalFilePrompt(input)
   await ensureSchema()
   const sql = getSql() as any
 
@@ -164,6 +168,7 @@ export async function createFilePrompt(input: FilePromptInput): Promise<FileProm
 }
 
 export async function updateFilePrompt(id: number, input: FilePromptInput): Promise<FilePrompt | null> {
+  if (shouldUseLocalPersistence()) return updateLocalFilePrompt(id, input)
   const sql = getSql() as any
 
   for (const flag of ['is_default_document', 'is_default_image', 'is_default_audio'] as const) {
@@ -184,12 +189,117 @@ export async function updateFilePrompt(id: number, input: FilePromptInput): Prom
 }
 
 export async function deleteFilePrompt(id: number): Promise<boolean> {
+  if (shouldUseLocalPersistence()) return deleteLocalFilePrompt(id)
   const sql = getSql() as any
   const rows = await sql`
     delete from file_prompts where id = ${id}
     returning id
   `
   return rows.length > 0
+}
+
+async function listLocalFilePrompts(): Promise<FilePrompt[]> {
+  const rows = await readLocalJson<FilePrompt[]>('file-prompts.json', [])
+  if (rows.length > 0) return ensureLocalAudioDefault(rows)
+  const now = new Date().toISOString()
+  const seeded = DEFAULTS.map((item, index) => ({
+    id: index + 1,
+    text: item.text,
+    is_default_document: item.is_default_document ?? false,
+    is_default_image: item.is_default_image ?? false,
+    is_default_audio: item.is_default_audio ?? false,
+    created_at: now,
+    updated_at: now,
+  }))
+  await writeLocalJson('file-prompts.json', seeded)
+  return seeded
+}
+
+async function getLocalDefaults(): Promise<FilePromptDefaults> {
+  const rows = await listLocalFilePrompts()
+  return {
+    document: rows.find(row => row.is_default_document) ?? null,
+    image: rows.find(row => row.is_default_image) ?? null,
+    audio: rows.find(row => row.is_default_audio) ?? null,
+  }
+}
+
+async function createLocalFilePrompt(input: FilePromptInput): Promise<FilePrompt> {
+  const rows = await listLocalFilePrompts()
+  const now = new Date().toISOString()
+  const nextRows = clearLocalDefaults(rows, input)
+  const row: FilePrompt = {
+    id: nextLocalId(nextRows),
+    text: input.text,
+    is_default_document: input.is_default_document ?? false,
+    is_default_image: input.is_default_image ?? false,
+    is_default_audio: input.is_default_audio ?? false,
+    created_at: now,
+    updated_at: now,
+  }
+  nextRows.push(row)
+  await writeLocalJson('file-prompts.json', nextRows)
+  return row
+}
+
+async function updateLocalFilePrompt(id: number, input: FilePromptInput): Promise<FilePrompt | null> {
+  const rows = await listLocalFilePrompts()
+  const index = rows.findIndex(row => row.id === id)
+  if (index < 0) return null
+  const nextRows = clearLocalDefaults(rows, input, id)
+  const row: FilePrompt = {
+    ...nextRows[index],
+    text: input.text,
+    is_default_document: input.is_default_document ?? false,
+    is_default_image: input.is_default_image ?? false,
+    is_default_audio: input.is_default_audio ?? false,
+    updated_at: new Date().toISOString(),
+  }
+  nextRows[index] = row
+  await writeLocalJson('file-prompts.json', nextRows)
+  return row
+}
+
+async function deleteLocalFilePrompt(id: number): Promise<boolean> {
+  const rows = await listLocalFilePrompts()
+  const next = rows.filter(row => row.id !== id)
+  await writeLocalJson('file-prompts.json', next)
+  return next.length !== rows.length
+}
+
+function clearLocalDefaults(rows: FilePrompt[], input: FilePromptInput, excludeId?: number) {
+  return rows.map(row => ({
+    ...row,
+    is_default_document: input.is_default_document && row.id !== excludeId ? false : row.is_default_document,
+    is_default_image: input.is_default_image && row.id !== excludeId ? false : row.is_default_image,
+    is_default_audio: input.is_default_audio && row.id !== excludeId ? false : row.is_default_audio,
+  }))
+}
+
+async function ensureLocalAudioDefault(rows: FilePrompt[]) {
+  const defaultAudioPrompt = defaultPromptForFileType('audio')!
+  const current = rows.find(row => row.is_default_audio)
+  if (current?.text && !current.text.toLowerCase().includes('document') && current.text !== 'Perform speech to text on this audio file, reply with only the text') return rows
+  const now = new Date().toISOString()
+  const updated = rows.map(row => ({
+    ...row,
+    is_default_audio: row.text === defaultAudioPrompt,
+    text: row.id === current?.id ? defaultAudioPrompt : row.text,
+    updated_at: row.id === current?.id ? now : row.updated_at,
+  }))
+  if (!updated.some(row => row.is_default_audio)) {
+    updated.push({
+      id: nextLocalId(updated),
+      text: defaultAudioPrompt,
+      is_default_document: false,
+      is_default_image: false,
+      is_default_audio: true,
+      created_at: now,
+      updated_at: now,
+    })
+  }
+  await writeLocalJson('file-prompts.json', updated)
+  return updated
 }
 
 export function defaultPromptForFileType(fileType: string): string | null {
