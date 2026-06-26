@@ -1,5 +1,5 @@
 import { type ReactNode, useEffect, useMemo, useState } from 'react'
-import { Archive, ArrowDown, ArrowUp, BarChart3, Database, EyeOff, RefreshCw, RotateCcw, Search, Table2, Trash2, X } from 'lucide-react'
+import { Archive, ArrowDown, ArrowUp, BarChart3, ChevronDown, ChevronUp, Database, EyeOff, RefreshCw, RotateCcw, Search, Table2, Trash2, X } from 'lucide-react'
 import {
   Bar, BarChart, CartesianGrid, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from 'recharts'
@@ -65,6 +65,7 @@ export function ResultsArchiveTab() {
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set())
   const [columnOrder, setColumnOrder] = useState<SortField[]>(() => RECORD_COLUMNS.map(column => column.id))
   const [draggedColumn, setDraggedColumn] = useState<SortField | null>(null)
+  const [filtersExpanded, setFiltersExpanded] = useState(true)
 
   async function loadArchive() {
     await loadArchivedRecords(5000, true)
@@ -368,9 +369,14 @@ export function ResultsArchiveTab() {
           </h2>
           <p className="text-sm text-surface-400 mt-1">Persisted run history with prompt/file hashes, model usage, output, latency, and cost.</p>
         </div>
-        <button onClick={loadArchive} disabled={loading} className="btn-secondary flex items-center gap-1.5">
-          <RefreshCw size={16} className={loading ? 'animate-spin' : ''} /> Refresh
-        </button>
+        <div className="flex items-center gap-2">
+          <button onClick={exportArchiveXLSX} disabled={sorted.length === 0} className="btn-secondary flex items-center gap-1.5">
+            <Database size={14} /> Export XLS
+          </button>
+          <button onClick={loadArchive} disabled={loading} className="btn-secondary flex items-center gap-1.5">
+            <RefreshCw size={16} className={loading ? 'animate-spin' : ''} /> Refresh
+          </button>
+        </div>
       </div>
 
       <div className="grid grid-cols-7 gap-3">
@@ -393,29 +399,38 @@ export function ResultsArchiveTab() {
             className="input w-full pl-9"
           />
         </div>
-        <FilterSelect value={provider} onChange={setProvider} options={providers} label="All providers" />
-        <FilterSelect value={model} onChange={setModel} options={models} label="All models" />
-        <FilterSelect value={status} onChange={setStatus} options={statuses} label="All statuses" />
-        <FilterSelect value={sourceType} onChange={setSourceType} options={sourceTypes} label="All sources" />
-        <FilterSelect value={fileName} onChange={setFileName} options={fileNames} label="All files" />
-        <FilterSelect value={documentType} onChange={setDocumentType} options={documentTypes} label="All doc types" />
-        <FilterSelect value={category} onChange={setCategory} options={categories} label="All categories" />
-        <FilterSelect value={runNameFilter} onChange={setRunNameFilter} options={runNames} label="All run names" />
-        <select value={archiveMode} onChange={e => setArchiveMode(e.target.value as typeof archiveMode)} className="input min-w-44">
-          <option value="latest">Latest per checksum</option>
-          <option value="history">All observations</option>
-        </select>
-        <select value={visibility} onChange={e => setVisibility(e.target.value as typeof visibility)} className="input min-w-36">
-          <option value="active">Active only</option>
-          <option value="all">Active + suppressed</option>
-          <option value="suppressed">Suppressed only</option>
-        </select>
+        <button
+          onClick={() => setFiltersExpanded(!filtersExpanded)}
+          className="btn-secondary flex items-center gap-1.5"
+          title={filtersExpanded ? 'Collapse filters' : 'Expand filters'}
+        >
+          {filtersExpanded ? <ChevronUp size={15} /> : <ChevronDown size={15} />}
+          {filtersExpanded ? 'Less' : 'More'}
+        </button>
         <button onClick={resetFilters} className="btn-secondary flex items-center gap-1.5">
           <X size={15} /> Reset
         </button>
-        <button onClick={exportArchiveXLSX} disabled={sorted.length === 0} className="btn-secondary flex items-center gap-1.5">
-          Export XLS
-        </button>
+        {filtersExpanded && (
+          <>
+            <FilterSelect value={provider} onChange={setProvider} options={providers} label="All providers" />
+            <FilterSelect value={model} onChange={setModel} options={models} label="All models" />
+            <FilterSelect value={status} onChange={setStatus} options={statuses} label="All statuses" />
+            <FilterSelect value={sourceType} onChange={setSourceType} options={sourceTypes} label="All sources" />
+            <FilterSelect value={fileName} onChange={setFileName} options={fileNames} label="All files" />
+            <FilterSelect value={documentType} onChange={setDocumentType} options={documentTypes} label="All doc types" />
+            <FilterSelect value={category} onChange={setCategory} options={categories} label="All categories" />
+            <FilterSelect value={runNameFilter} onChange={setRunNameFilter} options={runNames} label="All run names" />
+            <select value={archiveMode} onChange={e => setArchiveMode(e.target.value as typeof archiveMode)} className="input min-w-44">
+              <option value="latest">Latest per checksum</option>
+              <option value="history">All observations</option>
+            </select>
+            <select value={visibility} onChange={e => setVisibility(e.target.value as typeof visibility)} className="input min-w-36">
+              <option value="active">Active only</option>
+              <option value="all">Active + suppressed</option>
+              <option value="suppressed">Suppressed only</option>
+            </select>
+          </>
+        )}
         <div className="ml-auto flex rounded-lg border border-surface-700 bg-surface-850 p-1">
           <button onClick={() => setView('table')} className={`px-3 py-1.5 text-xs rounded-md flex items-center gap-1.5 ${view === 'table' ? 'bg-brand-gold text-brand-charcoal' : 'text-surface-400 hover:text-surface-100'}`}>
             <Table2 size={14} /> Table

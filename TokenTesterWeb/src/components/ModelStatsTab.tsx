@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
-import { ArrowDown, ArrowUp, BarChart3, Search } from 'lucide-react'
+import { ArrowDown, ArrowUp, BarChart3, Database, RefreshCw, Search } from 'lucide-react'
 import { buildModelStatsRows, type ModelStatsRow } from '../lib/model-stats'
 import { formatCurrency, formatDuration, formatFileSize, formatNumber } from '../utils/formatters'
 import { useStore } from '../store'
+import * as XLSX from 'xlsx'
 
 type SortField = keyof Pick<ModelStatsRow,
   'providerName' | 'model' | 'documentCategory' | 'documentType' | 'runs' | 'successRate' |
@@ -89,11 +90,51 @@ export function ModelStatsTab() {
     )
   }
 
+  function exportModelStatsXLSX() {
+    const data = sortedRows.map(row => ({
+      Provider: row.providerName,
+      Model: row.model,
+      Category: row.documentCategory,
+      'Doc Type': row.documentType,
+      Runs: row.runs,
+      Success: `${Math.round(row.successRate * 100)}%`,
+      'Avg Tokens': Math.round(row.averageTotalTokens),
+      'Avg Cost': formatCurrency(row.averageCost),
+      'Avg Latency': formatDuration(row.averageLatencyMs),
+      'Avg Size': formatFileSize(row.averageFileSize),
+      'Avg Features': row.averageExtractedFeatureCount.toFixed(1),
+      'Cost / Feature': row.costPerExtractedFeature == null ? '-' : formatCurrency(row.costPerExtractedFeature),
+      'Total Cost': formatCurrency(row.totalCost),
+      'Last Run': row.lastRunTimestamp,
+    }))
+    const ws = XLSX.utils.json_to_sheet(data)
+    const wb = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(wb, ws, 'ModelStats')
+    const buf = XLSX.write(wb, { bookType: 'xlsx', type: 'array' })
+    const blob = new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `model-stats-${new Date().toISOString().slice(0, 10)}.xlsx`
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
   return (
     <div className="space-y-6 p-6">
-      <div>
-        <h2 className="text-xl font-bold text-surface-100">Model Stats</h2>
-        <p className="text-sm text-surface-400 mt-1">Archive-level model performance grouped by provider, model, category, and document type.</p>
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <h2 className="text-xl font-bold text-surface-100">Model Stats</h2>
+          <p className="text-sm text-surface-400 mt-1">Archive-level model performance grouped by provider, model, category, and document type.</p>
+        </div>
+        <div className="flex items-center gap-2">
+          <button onClick={exportModelStatsXLSX} disabled={sortedRows.length === 0} className="btn-secondary flex items-center gap-1.5">
+            <Database size={14} /> Export XLS
+          </button>
+          <button onClick={() => loadArchivedRecords(5000, true)} disabled={loading} className="btn-secondary flex items-center gap-1.5">
+            <RefreshCw size={16} className={loading ? 'animate-spin' : ''} /> Refresh
+          </button>
+        </div>
       </div>
 
       <div className="grid gap-3 md:grid-cols-3">
