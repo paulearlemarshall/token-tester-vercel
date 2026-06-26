@@ -23,13 +23,17 @@ https://token-tester-web.vercel.app
 - Skip unsupported file/provider combinations without retrying fake placeholder content.
 - Run text, image, PDF, DOCX, audio, video, and batch-file workloads where provider adapters support them.
 - Default audio-only file runs use a speech-to-text prompt unless the user supplies a custom prompt.
+- Optional run name labelling for queue batches, persisted with every archived observation.
+- Parallel execution across providers with configurable per-provider concurrency (1-5).
 - Track local token estimates, provider token usage, latency, output text, errors, and estimated cost.
 - Persist every completed run to Neon with checksums, timestamps, provider metadata, payloads, and pricing context.
+- File Prompt Library: DB-backed saved prompts with default-per-type flags (document, image, audio).
 - Categorize archived documents with OpenAI when `OPENAI_API_KEY` is present, with heuristic fallback.
-- Slice archived observations by provider, model, status, source, file, prompt, checksum, suppression state, and date.
+- Slice archived observations by provider, model, status, source, file, prompt, document type, category, run name, checksum, suppression state, and date.
 - Analyze archived runs in Model Stats by provider, model, category, and document type.
-- Export archive data to XLS.
+- Export archive data and model stats to XLS.
 - Inspect provider-specific request handling from the Models tab.
+- Collapsible filter panel in Results Archive — smart filter always visible, individual dropdowns collapsible.
 
 ## Runtime Stack
 
@@ -70,6 +74,15 @@ src/lib/model-stats.ts                   Archive grouping and derived model stat
 src/lib/document-category.ts             Document category validation and heuristic classification
 src/lib/local-persistence.ts             File-backed local persistence fallback
 src/lib/web-api.ts                       Browser wrappers for app API routes
+src/lib/file-prompts.ts                  File prompt library CRUD with default-type flags
+src/lib/model-presets.ts                 Model preset CRUD
+src/lib/provider-capabilities.ts         Attachment-type acceptance checks
+src/lib/provider-key.ts                  Pricing key normalization barrel
+src/lib/document-category.ts             Document classification (heuristic + optional OpenAI)
+src/utils/model-capabilities.ts          Capability inference + label/style maps
+src/utils/constants.ts                   Built-in provider presets + logo map
+src/utils/formatters.ts                  Currency, number, duration, file-size, cost formatting
+src/store.ts                             Zustand state management + localStorage persistence
 src/types.ts                             Shared TypeScript types
 scripts/setup-pricing-db.mjs             Database setup and schema repair
 scripts/seed-pricing.mjs                 Pricing importer
@@ -152,8 +165,10 @@ The Run Tests tab generates work, runs jobs, and shows queue/output execution de
 It supports:
 
 - Queue generation across selected providers, models, prompts, and files.
+- Optional run name labelling for the generated queue batch.
 - Incremental queue generation.
-- Run-all for queued work only.
+- Run-all for queued work (sequential or parallel mode).
+- Parallel execution: per-provider concurrency (1-5 jobs at a time).
 - Individual retry for error rows.
 - Clear queue reset.
 - Skipped rows for unsupported attachments.
@@ -195,13 +210,17 @@ It supports:
 - Records table view.
 - Group by file.
 - Group by prompt.
+- Collapsible filter panel — smart filter always visible, individual dropdowns collapsible.
 - Provider filter.
 - Model filter.
 - Status filter.
 - Source type filter.
 - File filter.
+- Document type filter (derived from media type/metadata).
+- Document category filter.
+- Run name filter.
 - Suppression visibility filter.
-- Free-text search across provider, model, source, file name, path, hashes, response text, and errors.
+- Free-text search across provider, model, source, file name, path, hashes, document type, category, run name, response text, and errors.
 - Reset filters.
 - Sortable data columns.
 - Drag-reorderable data columns.
@@ -210,8 +229,10 @@ It supports:
 - Suppress selected.
 - Restore selected.
 - Confirmed permanent delete.
-- XLS export.
+- Export XLS (top-right button).
+- Refresh (top-right button).
 - Charts and summary metrics.
+- Default view: Table (Charts toggle available).
 
 Suppression behavior:
 
@@ -289,7 +310,7 @@ Examples:
   - **Audio on transcription models** (whisper-*, gpt-4o-transcribe-*): `/v1/audio/transcriptions` as multipart form upload.
 - Other OpenAI-compatible adapters (openrouter, deepseek, mistral) still use `/v1/chat/completions`, `messages`, and either `max_tokens` or `max_completion_tokens` for reasoning-style models.
 - OpenRouter is treated as PDF-capable through its universal PDF path, while image and audio support are model-dependent.
-- OpenRouter audio attachments use `input_audio` with `inputAudio: { data, format }`.
+- OpenRouter audio attachments use `input_audio` with `input_audio: { data, format }` (OpenAI-compatible snake_case).
 - OpenRouter transcription-output models use `/v1/audio/transcriptions` for audio-only runs.
 - DeepSeek-routed models are treated as text-only.
 
@@ -422,6 +443,7 @@ Stored execution fields:
 - Estimated cost.
 - Response text.
 - Error text.
+- Run name.
 - Request payload.
 - Response payload.
 - Run started timestamp.
@@ -545,6 +567,7 @@ run_results (
   estimated_cost numeric(18, 9),
   response_text text,
   error text,
+  run_name text,
   document_category text,
   document_category_confidence numeric(5, 4),
   document_category_source text,
@@ -557,6 +580,24 @@ run_results (
   updated_at timestamptz
 )
 ```
+
+`file_prompts` stores saved file prompt library entries:
+
+```sql
+file_prompts (
+  id bigserial primary key,
+  text text not null,
+  label text not null default '',
+  is_default_document boolean not null default false,
+  is_default_image boolean not null default false,
+  is_default_audio boolean not null default false,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique (text, label)
+)
+```
+
+Default-boolean uniqueness is enforced server-side: saving a prompt with `is_default_document = true` unsets the flag on all other prompts first.
 
 Important indexes cover:
 
@@ -824,6 +865,53 @@ Useful xAI model route test:
 - Deleted archive records cannot be restored through the UI.
 - Provider-specific behavior belongs in adapter/capability modules, not scattered across UI components.
 - Pricing key normalization belongs in `src/lib/pricing-match.ts`.
+
+## Special Handling
+
+### Audio Routing
+OpenAI audio-capable chat models (gpt-4o-audio-preview, gpt-audio-*) use `/v1/chat/completions` with `input_audio` content parts (snake_case). Transcription-output models (whisper, gpt-4o-transcribe) use the `/v1/audio/transcriptions` endpoint. The same pattern applies through OpenRouter and xAI.
+
+### OpenRouter Audio
+OpenRouter audio payloads use `input_audio: { data, format }` in the chat completions content array, matching OpenAI's `input_audio` field name (snake_case, not camelCase). Using `inputAudio` (camelCase) causes the model to reject the request with "This model requires that either input content or output modality contain audio."
+
+### xAI Audio
+xAI does not support audio in its Responses API natively. Audio files are first transcribed through `/v1/stt` (multipart upload), then the transcript text is appended to the user prompt before sending to `/v1/responses`.
+
+### OpenAI Document Classification
+When `OPENAI_API_KEY` is set, documents are classified by calling OpenAI with the filename, path, user message, and response text. Without it, a heuristic regex matcher runs against filename, path, content, and metadata patterns.
+
+### Schema Migrations
+The `ensureRunResultsSchema()` function uses additive `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` statements so the schema can evolve without destructive migrations. New columns are simply appended to the schema function.
+
+### Local Persistence Fallback
+When `DATABASE_URL` is not set, all Neon-backed modules transparently fall back to JSON files in `.local-data/`. This allows full local testing without a Postgres connection.
+
+### Pricing Cascading
+Effective pricing resolves by priority: manual UI overrides (50) > provider-discovered (100) > `llm-prices` seed (10). Within equal priority, the most recently updated record wins.
+
+### Queue Preview
+Generated queue items include a `preview` field with the full request payload (base64 content replaced by `[BASE64_TYPE: size]` placeholders) plus handling notes explaining the adapter's routing choice.
+
+### Append-Only Archive
+Archived results are append-only. `pushDebugEntry` appends entries to maintain stable sequential indices. The "latest per checksum" mode deduplicates at query time rather than during storage.
+
+## Modularity Assessment
+
+### Strengths
+1. **Clear directory separation**: `src/app/` (routing), `src/components/` (UI), `src/lib/` (business logic + data access), `src/utils/` (pure functions).
+2. **Thin API routes**: Each route handler is 8-50 lines — parses the request, calls a lib function, returns JSON. No business logic leaks into routes.
+3. **Adapter pattern for providers**: `provider-registry.ts` defines 12 adapters with canonical keys and capability tables. `provider-api.ts` dispatches to adapter-specific implementations. Adding a new provider requires only a new adapter entry.
+4. **Dual persistence layer**: Every Neon-backed module (pricing, run-results, file-prompts, model-presets) transparently falls back to local JSON files via `local-persistence.ts`.
+5. **Single Zustand store**: All client state flows through `store.ts` with localStorage persistence and migration logic.
+6. **Single types file**: All domain types live in `types.ts`, preventing circular imports.
+
+### Improvement Areas
+1. **Large components** — `RunTab.tsx` (1173 lines), `ModelsTab.tsx` (841 lines), `ResultsArchiveTab.tsx` (650 lines) bundle UI rendering, state, event handlers, and business logic. These would benefit from extracting sub-components.
+2. **Store monolith** — `store.ts` mixes application state, localStorage persistence, API fetch actions, and migration logic. Consider splitting into Zustand slices (config, prompts, queue, archive).
+3. **Message builder duplication** — `buildOpenRouterMessages`, `buildOpenAIMessages`, `buildOpenAIResponsesInput` share common attachment-to-content-part patterns. Extracting shared builders would reduce duplication.
+4. **Audio routing split** — `audioRoutingForModel` in RunTab.tsx duplicates the transcription-detection logic in `shouldUseOpenRouterTranscription` in provider-api.ts. A shared utility would keep routing consistent.
+5. **Provider API module size** — `provider-api.ts` (936 lines) handles model discovery, 12 adapters, transcription, and response parsing. Could split into provider-specific files.
+6. **Inline API calls in components** — Some components call `webApi.*` directly rather than going through the store. Moving side effects into store actions would centralize error handling and loading state.
 
 ## Troubleshooting
 
