@@ -305,6 +305,9 @@ export function RunTab() {
   const [hideFailedOutput, setHideFailedOutput] = useState(false)
   const [requestCollapsed, setRequestCollapsed] = useState(true)
   const [expandedQueueRun, setExpandedQueueRun] = useState<Set<string>>(new Set())
+  const [parallelEnabled, setParallelEnabled] = useState(false)
+  const [parallelJobs, setParallelJobs] = useState(1)
+  const [runName, setRunName] = useState('')
 
   const enabledProviders = config.providers.filter((p: any) => p.enabled)
 
@@ -406,6 +409,7 @@ export function RunTab() {
         requestPayload: result.requestPayload,
         responsePayload: result,
         runStartedAt: run.timestamp,
+        runName: run.runName ?? null,
       })
     } catch (err) {
       console.error('Failed to archive run result', err)
@@ -470,6 +474,7 @@ export function RunTab() {
               .map(key => modelPricing[key])
               .find(price => price && (price.input > 0 || price.output > 0)),
             preview: computeRunPreview(prov, model, files, systemPrompt, tc.userMessage),
+            runName: runName || undefined,
           }
           const key = runIdentityKey(run)
           if (!existingKeys.has(key)) {
@@ -635,10 +640,55 @@ export function RunTab() {
     setIsRunning(true)
     setProgress({ completed: 0, total: pendingRuns.length })
 
-    for (let i = 0; i < pendingRuns.length; i++) {
-      const run = pendingRuns[i]
-      if (!useStore.getState().isRunning) break
-      await executeRun(run)
+    if (!parallelEnabled) {
+      for (let i = 0; i < pendingRuns.length; i++) {
+        const run = pendingRuns[i]
+        if (!useStore.getState().isRunning) break
+        await executeRun(run)
+      }
+    } else {
+      const byProvider = new Map<string, TestRun[]>()
+      for (const run of pendingRuns) {
+        const list = byProvider.get(run.providerName) ?? []
+        list.push(run)
+        byProvider.set(run.providerName, list)
+      }
+
+      const waitForSlot = (() => {
+        const active = new Map<string, number>()
+        const pending: (() => void)[] = []
+        return {
+          acquire: async (provider: string) => {
+            const count = active.get(provider) ?? 0
+            if (count < parallelJobs) {
+              active.set(provider, count + 1)
+              return
+            }
+            await new Promise<void>(resolve => { pending.push(resolve) })
+            active.set(provider, (active.get(provider) ?? 0) + 1)
+          },
+          release: (provider: string) => {
+            active.set(provider, (active.get(provider) ?? 0) - 1)
+            const next = pending.shift()
+            if (next) next()
+          },
+        }
+      })()
+
+      const tasks = Array.from(byProvider.entries()).flatMap(([provider, runs]) =>
+        runs.map(async run => {
+          if (!useStore.getState().isRunning) return
+          await waitForSlot.acquire(provider)
+          if (!useStore.getState().isRunning) { waitForSlot.release(provider); return }
+          try {
+            await executeRun(run)
+          } finally {
+            waitForSlot.release(provider)
+          }
+        })
+      )
+
+      await Promise.all(tasks)
     }
 
     setIsRunning(false)
@@ -737,7 +787,7 @@ export function RunTab() {
       </div>
 
       {subTab === 'queue' ? (
-        <div className="flex-1 overflow-y-auto space-y-6 min-h-0 pr-1">
+        <div className="flex-1 overflow-y-auto space-y-4 min-h-0 pr-1">
           <div className="flex items-center justify-between shrink-0">
             <div>
               <h2 className="text-xl font-bold text-surface-100">Run Tests</h2>
@@ -763,6 +813,44 @@ export function RunTab() {
               <button onClick={clearRuns} disabled={isRunning} className="btn-danger flex items-center gap-1.5">
                 <Trash2 size={16} /> Clear
               </button>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-4 text-sm">
+            <div className="flex items-center gap-2">
+              <span className="text-surface-400">Run Name:</span>
+              <input
+                type="text"
+                value={runName}
+                onChange={e => setRunName(e.target.value)}
+                placeholder="(optional)"
+                className="input w-56 text-sm"
+              />
+            </div>
+            <div className="flex items-center gap-4 ml-auto">
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={parallelEnabled}
+                  onChange={e => setParallelEnabled(e.target.checked)}
+                  className="rounded border-surface-600 bg-surface-800 text-brand-gold focus:ring-brand-gold/30"
+                />
+                <span className="text-surface-300">Run parallel across providers</span>
+              </label>
+              {parallelEnabled && (
+                <div className="flex items-center gap-2">
+                  <span className="text-surface-400">Jobs per provider:</span>
+                  <select
+                    value={parallelJobs}
+                    onChange={e => setParallelJobs(Number(e.target.value))}
+                    className="input w-20 text-sm"
+                  >
+                    {[1, 2, 3, 4, 5].map(n => (
+                      <option key={n} value={n}>{n}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
             </div>
           </div>
 

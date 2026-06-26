@@ -10,7 +10,7 @@ import { formatCurrency, formatDuration, formatFileSize, formatNumber } from '..
 import { inferDocumentType } from '../lib/model-stats'
 import { useStore } from '../store'
 
-type SortField = 'completedAt' | 'createdAt' | 'providerName' | 'model' | 'status' | 'sourceType' | 'fileName' | 'prompt' | 'inputHash' | 'pdfSent' | 'pdfFileSize' | 'imageSent' | 'imageFileSize' | 'videoSent' | 'videoFileSize' | 'audioSent' | 'audioFileSize' | 'inputTokens' | 'outputTokens' | 'latencyMs' | 'estimatedCost' | 'suppressed'
+type SortField = 'completedAt' | 'createdAt' | 'providerName' | 'model' | 'status' | 'sourceType' | 'fileName' | 'prompt' | 'inputHash' | 'pdfSent' | 'pdfFileSize' | 'imageSent' | 'imageFileSize' | 'videoSent' | 'videoFileSize' | 'audioSent' | 'audioFileSize' | 'inputTokens' | 'outputTokens' | 'latencyMs' | 'estimatedCost' | 'suppressed' | 'runName'
 
 const COLORS = ['#f5c84c', '#57a6ff', '#37c391', '#f97316', '#a78bfa', '#ef4444', '#14b8a6', '#ec4899']
 
@@ -19,6 +19,7 @@ const RECORD_COLUMNS: { id: SortField; label: string; cellClassName?: string; ce
   { id: 'model', label: 'Model', cellClassName: 'font-mono text-xs text-surface-200', cell: record => record.model },
   { id: 'status', label: 'Status', cell: record => <StatusBadge status={record.status} /> },
   { id: 'sourceType', label: 'Source', cellClassName: 'text-surface-300', cell: record => record.sourceType },
+  { id: 'runName', label: 'Run Name', cellClassName: 'text-surface-300', cell: record => record.runName ?? '—' },
   { id: 'fileName', label: 'File', cellClassName: 'text-surface-300', cell: record => <span title={record.filePath ?? undefined}>{record.fileName ?? '—'}</span> },
   { id: 'prompt', label: 'Prompt', cellClassName: 'text-surface-300', cell: record => <span title={record.userMessage ?? undefined}>{promptPreview(record)}</span> },
   { id: 'inputHash', label: 'Input Hash', cellClassName: 'font-mono text-[11px] text-surface-500', cell: record => <span title={record.inputHash}>{record.inputHash.slice(0, 12)}</span> },
@@ -54,6 +55,7 @@ export function ResultsArchiveTab() {
   const [fileName, setFileName] = useState('')
   const [documentType, setDocumentType] = useState('')
   const [category, setCategory] = useState('')
+  const [runNameFilter, setRunNameFilter] = useState('')
   const [view, setView] = useState<'table' | 'charts'>('table')
   const [tableView, setTableView] = useState<'records' | 'file' | 'prompt'>('records')
   const [visibility, setVisibility] = useState<'active' | 'all' | 'suppressed'>('all')
@@ -79,6 +81,7 @@ export function ResultsArchiveTab() {
   const fileNames = useMemo(() => [...new Set(records.map(r => r.fileName || '(no file)'))].sort(), [records])
   const documentTypes = useMemo(() => [...new Set(records.map(r => inferDocumentType(r)))].sort(), [records])
   const categories = useMemo(() => [...new Set(records.map(r => r.documentCategory).filter((v): v is string => !!v))].sort(), [records])
+  const runNames = useMemo(() => [...new Set(records.map(r => r.runName).filter((v): v is string => !!v))].sort(), [records])
   const visibleRecords = useMemo(() => {
     if (archiveMode === 'history') return records
     const latest = new Map<string, ArchivedRunResult>()
@@ -106,6 +109,7 @@ export function ResultsArchiveTab() {
       if (fileName && (record.fileName || '(no file)') !== fileName) return false
       if (documentType && inferDocumentType(record) !== documentType) return false
       if (category && record.documentCategory !== category) return false
+      if (runNameFilter && (record.runName ?? '') !== runNameFilter) return false
       if (!q) return true
       const haystack = [
         record.providerName,
@@ -121,12 +125,13 @@ export function ResultsArchiveTab() {
         record.userMessageHash,
         inferDocumentType(record),
         record.documentCategory,
+        record.runName,
         record.responseText,
         record.error,
       ].filter(Boolean).join(' ').toLowerCase()
       return haystack.includes(q)
     })
-  }, [visibleRecords, query, provider, model, status, sourceType, fileName, documentType, category, visibility])
+  }, [visibleRecords, query, provider, model, status, sourceType, fileName, documentType, category, runNameFilter, visibility])
 
   const sorted = useMemo(() => {
     const sign = sortDir === 'asc' ? 1 : -1
@@ -155,6 +160,7 @@ export function ResultsArchiveTab() {
         case 'latencyMs': cmp = a.latencyMs - b.latencyMs; break
         case 'estimatedCost': cmp = (a.estimatedCost ?? 0) - (b.estimatedCost ?? 0); break
         case 'suppressed': cmp = Number(a.suppressed) - Number(b.suppressed); break
+        case 'runName': cmp = (a.runName ?? '').localeCompare(b.runName ?? ''); break
       }
       return cmp * sign
     })
@@ -264,6 +270,7 @@ export function ResultsArchiveTab() {
     setFileName('')
     setDocumentType('')
     setCategory('')
+    setRunNameFilter('')
     setVisibility('all')
     setArchiveMode('latest')
     setTableView('records')
@@ -392,6 +399,7 @@ export function ResultsArchiveTab() {
         <FilterSelect value={fileName} onChange={setFileName} options={fileNames} label="All files" />
         <FilterSelect value={documentType} onChange={setDocumentType} options={documentTypes} label="All doc types" />
         <FilterSelect value={category} onChange={setCategory} options={categories} label="All categories" />
+        <FilterSelect value={runNameFilter} onChange={setRunNameFilter} options={runNames} label="All run names" />
         <select value={archiveMode} onChange={e => setArchiveMode(e.target.value as typeof archiveMode)} className="input min-w-44">
           <option value="latest">Latest per checksum</option>
           <option value="history">All observations</option>

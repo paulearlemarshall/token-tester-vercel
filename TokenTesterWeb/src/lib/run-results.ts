@@ -12,6 +12,7 @@ export interface RunResultInput {
   model: string
   sourceType: string
   sourceLabel: string
+  runName?: string | null
   systemPrompt?: string
   systemPromptHash?: string
   userMessage?: string
@@ -122,6 +123,7 @@ async function ensureRunResultsSchema() {
   await sql`alter table run_results add column if not exists video_file_size bigint`
   await sql`alter table run_results add column if not exists audio_sent boolean not null default false`
   await sql`alter table run_results add column if not exists audio_file_size bigint`
+  await sql`alter table run_results add column if not exists run_name text`
   await sql`alter table run_results add column if not exists document_category text`
   await sql`alter table run_results add column if not exists document_category_confidence numeric(5, 4)`
   await sql`alter table run_results add column if not exists document_category_source text`
@@ -159,6 +161,7 @@ export async function saveRunResult(input: RunResultInput) {
     insert into run_results (
       run_id,
       record_key,
+      run_name,
       status,
       provider_id,
       provider_name,
@@ -210,6 +213,7 @@ export async function saveRunResult(input: RunResultInput) {
     values (
       ${input.runId},
       ${recordKey},
+      ${input.runName ?? null},
       ${input.status},
       ${input.providerId ?? null},
       ${input.providerName},
@@ -261,6 +265,7 @@ export async function saveRunResult(input: RunResultInput) {
     on conflict (run_id) do update set
       status = excluded.status,
       record_key = excluded.record_key,
+      run_name = excluded.run_name,
       provider_id = excluded.provider_id,
       provider_name = excluded.provider_name,
       service_provider = excluded.service_provider,
@@ -322,6 +327,7 @@ export async function getRunResults(limit = 1000) {
       id,
       run_id,
       record_key,
+      run_name,
       status,
       provider_id,
       provider_name,
@@ -415,6 +421,7 @@ function rowToRunResult(row: any) {
     id: Number(row.id),
     runId: row.run_id,
     recordKey: row.record_key,
+    runName: row.run_name ?? null,
     status: row.status,
     providerId: row.provider_id,
     providerName: row.provider_name,
@@ -487,6 +494,7 @@ async function saveLocalRunResult(input: RunResultInput) {
     id: existing?.id ?? nextLocalId(rows),
     runId: input.runId,
     recordKey: input.recordKey || `${serviceProvider}|${input.model}|${input.inputHash}`,
+    runName: input.runName ?? null,
     status: input.status,
     providerId: input.providerId ?? null,
     providerName: input.providerName,

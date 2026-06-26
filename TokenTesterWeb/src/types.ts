@@ -117,6 +117,7 @@ export interface TestRun {
   timestamp: number
   priceOverride?: { input: number; output: number }
   preview?: RunPreviewInfo
+  runName?: string
 }
 
 export type TabId = 'configure' | 'prompts' | 'models' | 'run' | 'results' | 'archive' | 'modelStats'
@@ -195,6 +196,7 @@ export interface ArchivedRunResult {
   requestPayload?: unknown
   responsePayload?: unknown
   suppressed: boolean
+  runName?: string | null
   runStartedAt?: string | null
   completedAt: string
   createdAt: string
