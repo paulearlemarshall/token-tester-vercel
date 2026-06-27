@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from 'react'
-import { ArrowDown, ArrowUp, ChevronDown, ChevronRight, DollarSign, Search, ToggleLeft, ToggleRight, X } from 'lucide-react'
+import { ArrowDown, ArrowUp, ChevronDown, ChevronRight, Search, ToggleLeft, ToggleRight, X } from 'lucide-react'
 import { useStore } from '../store'
 import type { ModelPreset, ModelPresetModel, ProviderConfig } from '../types'
 import { webApi } from '../lib/web-api'
@@ -8,7 +8,7 @@ import { getAttachmentCapabilities, getProviderAdapter } from '../lib/provider-r
 import { CAPABILITY_LABELS, CAPABILITY_STYLES, inferModelCapabilities, type ModelCapability } from '../utils/model-capabilities'
 
 type SelectedModelSortField = 'provider' | 'model' | 'input' | 'output'
-type ProviderModelSort = 'active' | 'name-asc' | 'name-desc' | 'input-asc' | 'input-desc' | 'output-asc' | 'output-desc' | 'price-asc' | 'price-desc'
+type ProviderModelSort = 'active' | 'name-asc' | 'name-desc' | 'input-asc' | 'input-desc' | 'output-asc' | 'output-desc'
 type SelectedModelRow = {
   provider: ProviderConfig
   model: string
@@ -317,13 +317,6 @@ export function ModelsTab() {
     })
   }
 
-  function togglePriceSort(providerId: string) {
-    setSortModes(s => {
-      const cur = s[providerId] || 'name-asc'
-      return { ...s, [providerId]: cur === 'price-asc' ? 'price-desc' : 'price-asc' }
-    })
-  }
-
   function sortedModels(providerId: string, provider: ProviderKeyInput, models: string[]): string[] {
     const sort = sortModes[provider.name ?? providerId] || 'name-asc'
     if (sort === 'active') {
@@ -334,16 +327,11 @@ export function ModelsTab() {
         return a.localeCompare(b)
       })
     }
-    const [field, dir] = sort.split('-') as ['name' | 'input' | 'output' | 'price', 'asc' | 'desc']
+    const [field, dir] = sort.split('-') as ['name' | 'input' | 'output', 'asc' | 'desc']
     const sign = dir === 'asc' ? 1 : -1
     return [...models].sort((a, b) => {
       if (field === 'input') return (effectivePricing(provider, a).input - effectivePricing(provider, b).input) * sign
       if (field === 'output') return (effectivePricing(provider, a).output - effectivePricing(provider, b).output) * sign
-      if (field === 'price') {
-        const aPrice = effectivePricing(provider, a)
-        const bPrice = effectivePricing(provider, b)
-        return ((aPrice.input + aPrice.output) - (bPrice.input + bPrice.output)) * sign
-      }
       return a.localeCompare(b) * sign
     })
   }
@@ -378,6 +366,18 @@ export function ModelsTab() {
       }
     }
     return list
+  }
+
+  function updateModelPrice(provider: ProviderKeyInput, modelId: string, input: number, output: number) {
+    const providerKey = canonicalProviderKey(provider)
+    setModelPricing(`${providerKey}/${modelId}`, input, output)
+    webApi.savePricing({
+      serviceProvider: providerKey,
+      modelId,
+      input,
+      output,
+      displayName: modelId,
+    }).catch(err => console.error('Failed to save model pricing', err))
   }
 
   const selectedRows = selectedModelRows()
@@ -543,17 +543,6 @@ export function ModelsTab() {
                           )
                         })()}
                       </button>
-                      <button
-                        onClick={e => { e.stopPropagation(); togglePriceSort(prov.name) }}
-                        className={`rounded-md border px-1.5 py-1 transition-colors ${
-                          (sortModes[prov.name] || '').startsWith('price')
-                            ? 'border-brand-gold/45 bg-brand-gold/10 text-brand-gold'
-                            : 'border-surface-700 text-surface-400 hover:border-surface-500 hover:text-surface-200'
-                        }`}
-                        title={`Price sort: ${sortModes[prov.name] === 'price-asc' ? 'ascending' : sortModes[prov.name] === 'price-desc' ? 'descending' : 'off'}`}
-                      >
-                        <DollarSign size={13} />
-                      </button>
                       {(() => {
                         const filters = new Map<string, string>()
                         for (const m of (prov.modelMetas || [])) {
@@ -678,6 +667,32 @@ export function ModelsTab() {
                                     {CAPABILITY_LABELS[cap]}
                                   </span>
                                 ))}
+                              </div>
+                            </div>
+                            <div className="flex gap-1 mt-2" onClick={e => e.stopPropagation()}>
+                              <div className="flex-1 min-w-0">
+                                <label className="text-[9px] text-surface-400 block leading-tight">In $/M</label>
+                                <input
+                                  type="number"
+                                  min={0}
+                                  step={0.01}
+                                  value={pricing.input || ''}
+                                  onChange={e => updateModelPrice(prov, model, parseFloat(e.target.value) || 0, pricing.output)}
+                                  className="w-full bg-surface-800 border border-surface-600 rounded text-[10px] px-1 py-0.5 text-surface-100 focus:outline-none focus:ring-1 focus:ring-brand-gold"
+                                  placeholder="0"
+                                />
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <label className="text-[9px] text-surface-400 block leading-tight">Out $/M</label>
+                                <input
+                                  type="number"
+                                  min={0}
+                                  step={0.01}
+                                  value={pricing.output || ''}
+                                  onChange={e => updateModelPrice(prov, model, pricing.input, parseFloat(e.target.value) || 0)}
+                                  className="w-full bg-surface-800 border border-surface-600 rounded text-[10px] px-1 py-0.5 text-surface-100 focus:outline-none focus:ring-1 focus:ring-brand-gold"
+                                  placeholder="0"
+                                />
                               </div>
                             </div>
                           </div>
