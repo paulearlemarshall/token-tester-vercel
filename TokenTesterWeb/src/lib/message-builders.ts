@@ -54,17 +54,22 @@ export function hasNonAudioBinaryAttachments(input: NormalizedRunInput): boolean
 export function buildChatCompatMessages(input: NormalizedRunInput) {
   const messages: any[] = []
   if (input.systemPrompt) messages.push({ role: 'system', content: input.systemPrompt })
-  const content: any[] = [{ type: 'text', text: textWithAttachmentLabels(input) }]
-  for (const attachment of input.attachments) {
-    if (attachment.kind === 'image' && attachment.base64 && attachment.mimeType) {
-      content.push(imageContent(attachment))
-    } else if (attachment.kind === 'document' && attachment.base64 && attachment.mimeType) {
-      content.push(documentContent(attachment))
-    } else if (attachment.kind === 'audio' && attachment.base64) {
-      content.push(audioContent(attachment))
+  const hasParts = input.attachments.some(a => (a.kind === 'image' || a.kind === 'document' || a.kind === 'audio') && a.base64)
+  if (hasParts) {
+    const content: any[] = [{ type: 'text', text: textWithAttachmentLabels(input) }]
+    for (const attachment of input.attachments) {
+      if (attachment.kind === 'image' && attachment.base64 && attachment.mimeType) {
+        content.push(imageContent(attachment))
+      } else if (attachment.kind === 'document' && attachment.base64 && attachment.mimeType) {
+        content.push(documentContent(attachment))
+      } else if (attachment.kind === 'audio' && attachment.base64) {
+        content.push(audioContent(attachment))
+      }
     }
+    messages.push({ role: 'user', content })
+  } else {
+    messages.push({ role: 'user', content: textWithAttachmentLabels(input) })
   }
-  messages.push({ role: 'user', content })
   return messages
 }
 
