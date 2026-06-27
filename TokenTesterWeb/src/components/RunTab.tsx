@@ -305,8 +305,10 @@ export function RunTab() {
   const [hideFailedOutput, setHideFailedOutput] = useState(false)
   const [requestCollapsed, setRequestCollapsed] = useState(true)
   const [expandedQueueRun, setExpandedQueueRun] = useState<Set<string>>(new Set())
-  const [parallelEnabled, setParallelEnabled] = useState(false)
-  const [parallelJobs, setParallelJobs] = useState(1)
+  const parallelEnabled = useStore(s => s.parallelEnabled)
+  const setParallelEnabled = useStore(s => s.setParallelEnabled)
+  const parallelJobs = useStore(s => s.parallelJobs)
+  const setParallelJobs = useStore(s => s.setParallelJobs)
   const [runName, setRunName] = useState('')
 
   const enabledProviders = config.providers.filter((p: any) => p.enabled)
