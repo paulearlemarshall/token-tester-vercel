@@ -36,16 +36,7 @@ async function ensureSchema() {
   if (schemaReady) return
   const sql = getSql() as any
   await sql`CREATE SCHEMA IF NOT EXISTS config`
-  const tables = await sql`
-    SELECT table_schema FROM information_schema.tables
-    WHERE table_name = 'file_prompts' AND table_schema IN ('config', 'public')
-  ` as any[]
-  const hasPublic = tables.some((r: any) => r.table_schema === 'public')
-  const hasConfig = tables.some((r: any) => r.table_schema === 'config')
-  if (hasPublic && !hasConfig) {
-    await sql`ALTER TABLE public.file_prompts SET SCHEMA config`
-  } else if (!hasPublic && !hasConfig) {
-    await sql`
+  await sql`
     create table if not exists config.file_prompts (
       id serial primary key,
       text text not null,
@@ -56,7 +47,6 @@ async function ensureSchema() {
       updated_at timestamptz not null default now()
     )
   `
-  }
   await sql`alter table config.file_prompts drop column if exists file_type`.catch(() => {})
   await sql`alter table config.file_prompts add column if not exists is_default_document boolean not null default false`.catch(() => {})
   await sql`alter table config.file_prompts add column if not exists is_default_image boolean not null default false`.catch(() => {})

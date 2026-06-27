@@ -12,16 +12,7 @@ async function ensureModelPresetSchema() {
   if (schemaReady) return
   const sql = getSql() as any
   await sql`CREATE SCHEMA IF NOT EXISTS config`
-  const tables = await sql`
-    SELECT table_schema FROM information_schema.tables
-    WHERE table_name = 'model_presets' AND table_schema IN ('config', 'public')
-  ` as any[]
-  const hasPublic = tables.some((r: any) => r.table_schema === 'public')
-  const hasConfig = tables.some((r: any) => r.table_schema === 'config')
-  if (hasPublic && !hasConfig) {
-    await sql`ALTER TABLE public.model_presets SET SCHEMA config`
-  } else if (!hasPublic && !hasConfig) {
-    await sql`
+  await sql`
     create table if not exists config.model_presets (
       id bigserial primary key,
       name text not null,
@@ -30,7 +21,6 @@ async function ensureModelPresetSchema() {
       updated_at timestamptz not null default now()
     )
   `
-  }
   await sql`create unique index if not exists config.model_presets_name_lower_idx on config.model_presets (lower(name))`
   schemaReady = true
 }

@@ -10,11 +10,31 @@ if (!process.env.DATABASE_URL) {
 
 const sql = neon(process.env.DATABASE_URL)
 
-// ── Schemas ──────────────────────────────────────────────────────────
+// ── Create schemas first ──────────────────────────────────────────
 
-await sql`create schema if not exists results`
-await sql`create schema if not exists pricing`
-await sql`create schema if not exists config`
+await sql.query('CREATE SCHEMA IF NOT EXISTS results')
+await sql.query('CREATE SCHEMA IF NOT EXISTS pricing')
+await sql.query('CREATE SCHEMA IF NOT EXISTS config')
+console.log('Schemas created')
+
+// ── Try to migrate existing public tables ─────────────────────────
+
+const migrations = [
+  ['results', 'run_results'],
+  ['pricing', 'model_prices'],
+  ['pricing', 'model_price_records'],
+  ['config', 'file_prompts'],
+  ['config', 'model_presets'],
+]
+
+for (const [schema, table] of migrations) {
+  try {
+    await sql.query(`ALTER TABLE IF EXISTS public.${table} SET SCHEMA ${schema}`)
+    console.log(`  migrated public.${table} -> ${schema}.${table}`)
+  } catch (e) {
+    console.log(`  ${schema}.${table}: ${e.message.includes('already exists') ? 'already migrated' : 'will create'}`)
+  }
+}
 
 // ── results.run_results ──────────────────────────────────────────────
 
