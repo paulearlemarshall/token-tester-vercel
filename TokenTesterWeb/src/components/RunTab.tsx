@@ -748,26 +748,6 @@ export function RunTab() {
 
   return (
     <div className="p-6 pb-0 flex flex-col h-full">
-      {isRunning && (
-        <div className="card space-y-2 mb-3 shrink-0">
-          <div className="flex items-center justify-between text-sm">
-            <span className="text-surface-300 flex items-center gap-2">
-              <Loader2 size={16} className="animate-spin" />
-              Running... {progress.completed}/{progress.total}
-            </span>
-            <span className="text-surface-400">
-              {progress.total > 0 ? Math.round((progress.completed / progress.total) * 100) : 0}%
-            </span>
-          </div>
-          <div className="w-full bg-surface-800 rounded-full h-2 overflow-hidden">
-            <div
-              className="bg-brand-gold h-full rounded-full transition-all duration-300"
-              style={{ width: `${progress.total > 0 ? (progress.completed / progress.total) * 100 : 0}%` }}
-            />
-          </div>
-        </div>
-      )}
-
       <div className="flex items-center border-b border-surface-700 mb-4 shrink-0">
         <button
           onClick={() => setSubTab('queue')}
