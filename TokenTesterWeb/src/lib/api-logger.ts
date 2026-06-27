@@ -80,10 +80,12 @@ globalThis.fetch = function fetchWithLogging(url: RequestInfo | URL, options?: R
   return loggedFetch(ctx.caller, String(url), options ?? {}, ctx.logs, originalFetch)
 } as typeof fetch
 
-export function runWithLogging<T>(caller: string, fn: () => Promise<T>): Promise<{ result: T; logs: LogEntry[] }> {
+export function runWithLogging<T>(caller: string, fn: () => Promise<T>): Promise<{ result: T; logs: LogEntry[]; error?: unknown }> {
   const logs: LogEntry[] = []
   return logStorage.run({ logs, caller }, async () => {
     const result = await fn()
     return { result, logs }
+  }).catch((error: unknown) => {
+    return { result: undefined as unknown as T, logs, error }
   })
 }

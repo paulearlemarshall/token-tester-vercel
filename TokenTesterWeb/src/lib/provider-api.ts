@@ -185,7 +185,6 @@ export async function chatCompletion(params: ChatParams) {
 
   let logs: import('./api-logger').LogEntry[] = []
   try {
-    let result: ApiResult
     const adapter = getProviderAdapter(provider)
     const caller = `${provider.adapterId ?? provider.type}/${model}`
 
@@ -211,10 +210,10 @@ export async function chatCompletion(params: ChatParams) {
       }
     })
 
-    result = wrapped.result
     logs = wrapped.logs
+    if (wrapped.error) throw wrapped.error
     const latencyMs = Math.round(performance.now() - start)
-    return { ...result, logs, latencyMs }
+    return { ...wrapped.result, logs, latencyMs }
   } catch (err: any) {
     return {
       inputTokens: 0,
