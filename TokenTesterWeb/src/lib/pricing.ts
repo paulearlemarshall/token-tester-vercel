@@ -60,24 +60,26 @@ async function ensurePricingSchema() {
   const sql = getSql()
   await sql`CREATE SCHEMA IF NOT EXISTS pricing`
   // Migrate old public tables
-  await sql`
-    DO $$
-    BEGIN
-      IF EXISTS (SELECT FROM pg_class WHERE relname = 'model_prices' AND relnamespace = 'public'::regnamespace)
-         AND NOT EXISTS (SELECT FROM pg_class WHERE relname = 'model_prices' AND relnamespace = 'pricing'::regnamespace) THEN
-        ALTER TABLE public.model_prices SET SCHEMA pricing;
-      END IF;
-    END $$;
-  `
-  await sql`
-    DO $$
-    BEGIN
-      IF EXISTS (SELECT FROM pg_class WHERE relname = 'model_price_records' AND relnamespace = 'public'::regnamespace)
-         AND NOT EXISTS (SELECT FROM pg_class WHERE relname = 'model_price_records' AND relnamespace = 'pricing'::regnamespace) THEN
-        ALTER TABLE public.model_price_records SET SCHEMA pricing;
-      END IF;
-    END $$;
-  `
+  const [pricesTables, recordsTables] = await Promise.all([
+    (await sql`
+      SELECT table_schema FROM information_schema.tables
+      WHERE table_name = 'model_prices' AND table_schema IN ('pricing', 'public')
+    `) as any[],
+    (await sql`
+      SELECT table_schema FROM information_schema.tables
+      WHERE table_name = 'model_price_records' AND table_schema IN ('pricing', 'public')
+    `) as any[],
+  ])
+  const pricesPublic = pricesTables.some((r: any) => r.table_schema === 'public')
+  const pricesPricing = pricesTables.some((r: any) => r.table_schema === 'pricing')
+  const recordsPublic = recordsTables.some((r: any) => r.table_schema === 'public')
+  const recordsPricing = recordsTables.some((r: any) => r.table_schema === 'pricing')
+  if (pricesPublic && !pricesPricing) {
+    await sql`ALTER TABLE public.model_prices SET SCHEMA pricing`
+  }
+  if (recordsPublic && !recordsPricing) {
+    await sql`ALTER TABLE public.model_price_records SET SCHEMA pricing`
+  }
   pricingSchemaReady = true
 }
 

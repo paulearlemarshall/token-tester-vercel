@@ -59,16 +59,16 @@ async function ensureRunResultsSchema() {
   if (schemaReady) return
   const sql = getSql()
   await sql`CREATE SCHEMA IF NOT EXISTS results`
-  await sql`
-    DO $$
-    BEGIN
-      IF EXISTS (SELECT FROM pg_class WHERE relname = 'run_results' AND relnamespace = 'public'::regnamespace)
-         AND NOT EXISTS (SELECT FROM pg_class WHERE relname = 'run_results' AND relnamespace = 'results'::regnamespace) THEN
-        ALTER TABLE public.run_results SET SCHEMA results;
-      END IF;
-    END $$;
-  `
-  await sql`
+  const tables = await sql`
+    SELECT table_schema FROM information_schema.tables
+    WHERE table_name = 'run_results' AND table_schema IN ('results', 'public')
+  ` as any[]
+  const hasPublic = tables.some((r: any) => r.table_schema === 'public')
+  const hasResults = tables.some((r: any) => r.table_schema === 'results')
+  if (hasPublic && !hasResults) {
+    await sql`ALTER TABLE public.run_results SET SCHEMA results`
+  } else if (!hasPublic && !hasResults) {
+    await sql`
     create table if not exists results.run_results (
       id bigserial primary key,
       run_id text not null unique,
@@ -123,6 +123,7 @@ async function ensureRunResultsSchema() {
       updated_at timestamptz not null default now()
     )
   `
+  }
   await sql`alter table results.run_results add column if not exists suppressed boolean not null default false`
   await sql`alter table results.run_results add column if not exists record_key text`
   await sql`alter table results.run_results add column if not exists pdf_sent boolean not null default false`
