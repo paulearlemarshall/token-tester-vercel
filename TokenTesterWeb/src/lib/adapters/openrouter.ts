@@ -1,4 +1,4 @@
-import { buildChatCompatMessages, audioFormatForChatCompletion } from '../message-builders'
+import { buildChatCompatMessages, buildTextOnlyMessages, audioFormatForChatCompletion } from '../message-builders'
 import type { NormalizedRunInput } from '../run-input'
 import type { ApiResult } from './shared'
 import { parseHeaders, shouldUseTranscription } from './shared'
@@ -10,9 +10,18 @@ export async function adapterDispatch(
   baseUrl: string, apiKey: string, model: string, input: NormalizedRunInput,
   maxTokens: number, extraHeaders?: string, modelMetas?: { id: string; outputModalities?: string[] }[]
 ): Promise<ApiResult> {
-  return shouldUseTranscription(model, input, modelMetas)
-    ? await transcribeOpenRouterAudio(baseUrl, apiKey, model, input, extraHeaders)
-    : await chatOpenAICompat(baseUrl, apiKey, model, input, maxTokens, extraHeaders, buildChatCompatMessages)
+  if (shouldUseTranscription(model, input, modelMetas)) {
+    return await transcribeOpenRouterAudio(baseUrl, apiKey, model, input, extraHeaders)
+  }
+  try {
+    return await chatOpenAICompat(baseUrl, apiKey, model, input, maxTokens, extraHeaders, buildChatCompatMessages)
+  } catch (err: any) {
+    const msg = String(err?.message ?? '')
+    if (msg.includes('400') && (msg.includes('Type mismatch') || msg.includes('oneOf') || msg.includes('not in array'))) {
+      return await chatOpenAICompat(baseUrl, apiKey, model, input, maxTokens, extraHeaders, buildTextOnlyMessages)
+    }
+    throw err
+  }
 }
 
 async function transcribeOpenRouterAudio(
