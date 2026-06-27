@@ -21,7 +21,7 @@ async function ensureModelPresetSchema() {
       updated_at timestamptz not null default now()
     )
   `
-  await sql`create unique index if not exists config.model_presets_name_lower_idx on config.model_presets (lower(name))`
+  await sql`create unique index if not exists model_presets_name_lower_idx on config.model_presets (lower(name))`
   schemaReady = true
 }
 

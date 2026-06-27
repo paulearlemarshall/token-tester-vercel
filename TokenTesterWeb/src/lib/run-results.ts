@@ -134,14 +134,14 @@ async function ensureRunResultsSchema() {
     where record_key is null
   `
   await sql`alter table results.run_results alter column record_key set not null`
-  await sql`create index if not exists results.run_results_completed_idx on results.run_results (completed_at desc)`
-  await sql`create index if not exists results.run_results_created_idx on results.run_results (created_at desc)`
-  await sql`create index if not exists results.run_results_provider_model_idx on results.run_results (service_provider, model, completed_at desc)`
-  await sql`create index if not exists results.run_results_status_idx on results.run_results (status, completed_at desc)`
-  await sql`create index if not exists results.run_results_input_hash_idx on results.run_results (input_hash)`
-  await sql`create index if not exists results.run_results_file_hash_idx on results.run_results (file_hash)`
-  await sql`create index if not exists results.run_results_suppressed_idx on results.run_results (suppressed, completed_at desc)`
-  await sql`create index if not exists results.run_results_record_key_idx on results.run_results (record_key, completed_at desc, created_at desc)`
+  await sql`create index if not exists run_results_completed_idx on results.run_results (completed_at desc)`
+  await sql`create index if not exists run_results_created_idx on results.run_results (created_at desc)`
+  await sql`create index if not exists run_results_provider_model_idx on results.run_results (service_provider, model, completed_at desc)`
+  await sql`create index if not exists run_results_status_idx on results.run_results (status, completed_at desc)`
+  await sql`create index if not exists run_results_input_hash_idx on results.run_results (input_hash)`
+  await sql`create index if not exists run_results_file_hash_idx on results.run_results (file_hash)`
+  await sql`create index if not exists run_results_suppressed_idx on results.run_results (suppressed, completed_at desc)`
+  await sql`create index if not exists run_results_record_key_idx on results.run_results (record_key, completed_at desc, created_at desc)`
   schemaReady = true
 }
 
