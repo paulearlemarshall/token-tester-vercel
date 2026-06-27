@@ -120,7 +120,7 @@ export interface TestRun {
   runName?: string
 }
 
-export type TabId = 'configure' | 'prompts' | 'models' | 'run' | 'results' | 'archive' | 'modelStats'
+export type TabId = 'configure' | 'prompts' | 'models' | 'run' | 'results' | 'archive' | 'modelStats' | 'log'
 
 export type ThemeMode = 'system' | 'light' | 'dark'
 

@@ -73,13 +73,6 @@ export function buildChatCompatMessages(input: NormalizedRunInput) {
   return messages
 }
 
-export function buildTextOnlyMessages(input: NormalizedRunInput) {
-  const messages: any[] = []
-  if (input.systemPrompt) messages.push({ role: 'system', content: input.systemPrompt })
-  messages.push({ role: 'user', content: textWithAttachmentLabels(input) })
-  return messages
-}
-
 export function buildOpenAICompatMessages(input: NormalizedRunInput) {
   const messages: any[] = []
   if (input.systemPrompt) messages.push({ role: 'system', content: input.systemPrompt })
