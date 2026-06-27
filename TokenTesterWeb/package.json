@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "db:setup": "node scripts/setup-pricing-db.mjs",
+    "db:setup": "node scripts/setup-db.mjs",
     "db:import-pricing": "node scripts/seed-pricing.mjs"
   },
   "dependencies": {

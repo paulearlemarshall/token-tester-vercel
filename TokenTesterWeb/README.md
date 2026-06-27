@@ -84,7 +84,7 @@ src/utils/constants.ts                   Built-in provider presets + logo map
 src/utils/formatters.ts                  Currency, number, duration, file-size, cost formatting
 src/store.ts                             Zustand state management + localStorage persistence
 src/types.ts                             Shared TypeScript types
-scripts/setup-pricing-db.mjs             Database setup and schema repair
+scripts/setup-db.mjs                      Consolidated schema setup and repair
 scripts/seed-pricing.mjs                 Pricing importer
 ```
 
@@ -466,16 +466,16 @@ This makes it possible to see cost and token changes over time while still havin
 Main tables:
 
 ```sql
-model_presets
-model_prices
-model_price_records
-run_results
+config.model_presets
+pricing.model_prices
+pricing.model_price_records
+results.run_results
 ```
 
-`model_presets` stores named provider/model working sets:
+`config.model_presets` stores named provider/model working sets:
 
 ```sql
-model_presets (
+config.model_presets (
   id bigserial primary key,
   name text not null,
   models jsonb not null default '[]'::jsonb,
@@ -486,10 +486,10 @@ model_presets (
 
 Preset names are unique case-insensitively. Saving a preset with an existing name overwrites the model list.
 
-`model_prices` stores the effective legacy/current view:
+`pricing.model_prices` stores the effective legacy/current view:
 
 ```sql
-model_prices (
+pricing.model_prices (
   service_provider text not null,
   model_id text not null,
   upstream_provider text,
@@ -505,10 +505,10 @@ model_prices (
 )
 ```
 
-`model_price_records` stores source-specific records:
+`pricing.model_price_records` stores source-specific records:
 
 ```sql
-model_price_records (
+pricing.model_price_records (
   service_provider text not null,
   model_id text not null,
   source text not null,
@@ -523,10 +523,10 @@ model_price_records (
 )
 ```
 
-`run_results` stores archived observations:
+`results.run_results` stores archived observations:
 
 ```sql
-run_results (
+results.run_results (
   run_id text not null unique,
   record_key text not null,
   status text not null,
@@ -581,10 +581,10 @@ run_results (
 )
 ```
 
-`file_prompts` stores saved file prompt library entries:
+`config.file_prompts` stores saved file prompt library entries:
 
 ```sql
-file_prompts (
+config.file_prompts (
   id bigserial primary key,
   text text not null,
   label text not null default '',
