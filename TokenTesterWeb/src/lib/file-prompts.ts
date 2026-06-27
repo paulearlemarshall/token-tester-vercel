@@ -35,6 +35,16 @@ let schemaReady = false
 async function ensureSchema() {
   if (schemaReady) return
   const sql = getSql() as any
+  await sql`CREATE SCHEMA IF NOT EXISTS config`
+  await sql`
+    DO $$
+    BEGIN
+      IF EXISTS (SELECT FROM pg_class WHERE relname = 'file_prompts' AND relnamespace = 'public'::regnamespace)
+         AND NOT EXISTS (SELECT FROM pg_class WHERE relname = 'file_prompts' AND relnamespace = 'config'::regnamespace) THEN
+        ALTER TABLE public.file_prompts SET SCHEMA config;
+      END IF;
+    END $$;
+  `
   await sql`
     create table if not exists config.file_prompts (
       id serial primary key,

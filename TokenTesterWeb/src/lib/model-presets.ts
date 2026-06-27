@@ -11,6 +11,16 @@ let schemaReady = false
 async function ensureModelPresetSchema() {
   if (schemaReady) return
   const sql = getSql() as any
+  await sql`CREATE SCHEMA IF NOT EXISTS config`
+  await sql`
+    DO $$
+    BEGIN
+      IF EXISTS (SELECT FROM pg_class WHERE relname = 'model_presets' AND relnamespace = 'public'::regnamespace)
+         AND NOT EXISTS (SELECT FROM pg_class WHERE relname = 'model_presets' AND relnamespace = 'config'::regnamespace) THEN
+        ALTER TABLE public.model_presets SET SCHEMA config;
+      END IF;
+    END $$;
+  `
   await sql`
     create table if not exists config.model_presets (
       id bigserial primary key,

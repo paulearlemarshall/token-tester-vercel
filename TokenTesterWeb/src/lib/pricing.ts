@@ -53,9 +53,38 @@ export interface DeletePriceRecordInput {
   source?: string
 }
 
+let pricingSchemaReady = false
+
+async function ensurePricingSchema() {
+  if (pricingSchemaReady) return
+  const sql = getSql()
+  await sql`CREATE SCHEMA IF NOT EXISTS pricing`
+  // Migrate old public tables
+  await sql`
+    DO $$
+    BEGIN
+      IF EXISTS (SELECT FROM pg_class WHERE relname = 'model_prices' AND relnamespace = 'public'::regnamespace)
+         AND NOT EXISTS (SELECT FROM pg_class WHERE relname = 'model_prices' AND relnamespace = 'pricing'::regnamespace) THEN
+        ALTER TABLE public.model_prices SET SCHEMA pricing;
+      END IF;
+    END $$;
+  `
+  await sql`
+    DO $$
+    BEGIN
+      IF EXISTS (SELECT FROM pg_class WHERE relname = 'model_price_records' AND relnamespace = 'public'::regnamespace)
+         AND NOT EXISTS (SELECT FROM pg_class WHERE relname = 'model_price_records' AND relnamespace = 'pricing'::regnamespace) THEN
+        ALTER TABLE public.model_price_records SET SCHEMA pricing;
+      END IF;
+    END $$;
+  `
+  pricingSchemaReady = true
+}
+
 export async function getPricing() {
   if (shouldUseLocalPersistence()) return getLocalPricing()
   const sql = getSql()
+  await ensurePricingSchema()
   const rows = await sql`
     with candidates as (
       select
@@ -104,6 +133,7 @@ export async function getPricing() {
 export async function getPricingRecords() {
   if (shouldUseLocalPersistence()) return getLocalPricingRecords()
   const sql = getSql()
+  await ensurePricingSchema()
   const rows = await sql`
     with records as (
       select
@@ -194,6 +224,7 @@ export async function getPricingRecords() {
 }
 
 export async function upsertModelPrice(input: ModelPriceInput) {
+  await ensurePricingSchema()
   const serviceProvider = normalizeServiceProvider(input.serviceProvider)
   const modelId = input.modelId.trim()
   if (!serviceProvider || !modelId) {
@@ -327,6 +358,7 @@ export async function upsertModelPrice(input: ModelPriceInput) {
 
 export async function deleteModelPriceRecord(input: DeletePriceRecordInput) {
   if (shouldUseLocalPersistence()) return deleteLocalModelPriceRecord(input)
+  await ensurePricingSchema()
   const sql = getSql()
   let deleted: { service_provider: string; model_id: string }[] = []
 
