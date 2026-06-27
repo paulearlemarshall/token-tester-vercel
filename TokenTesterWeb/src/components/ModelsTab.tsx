@@ -562,10 +562,10 @@ export function ModelsTab() {
                         const filters = new Map<string, string>()
                         for (const m of (prov.modelMetas || [])) {
                           for (const mod of (m.inputModalities || [])) {
-                            if (mod && mod !== 'text') filters.set(`in:${mod}`, `${mod === 'image' ? 'Image' : mod} In`)
+                            if (mod && mod !== 'text') filters.set(`in:${mod}`, `${mod === 'image' ? 'Image' : mod.charAt(0).toUpperCase() + mod.slice(1)} In`)
                           }
                           for (const mod of (m.outputModalities || [])) {
-                            if (mod && mod !== 'text') filters.set(`out:${mod}`, `${mod === 'transcription' ? 'Transcription' : mod} Out`)
+                            if (mod && mod !== 'text') filters.set(`out:${mod}`, `${mod === 'transcription' ? 'Transcription' : mod.charAt(0).toUpperCase() + mod.slice(1)} Out`)
                           }
                           if (!m.inputModalities && !m.outputModalities && m.modality) {
                             m.modality.split('+').forEach((x: string) => {
