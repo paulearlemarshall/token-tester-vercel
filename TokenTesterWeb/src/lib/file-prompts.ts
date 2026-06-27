@@ -36,7 +36,7 @@ async function ensureSchema() {
   if (schemaReady) return
   const sql = getSql() as any
   await sql`
-    create table if not exists file_prompts (
+    create table if not exists config.file_prompts (
       id serial primary key,
       text text not null,
       is_default_document boolean not null default false,
@@ -46,21 +46,21 @@ async function ensureSchema() {
       updated_at timestamptz not null default now()
     )
   `
-  await sql`alter table file_prompts drop column if exists file_type`.catch(() => {})
-  await sql`alter table file_prompts add column if not exists is_default_document boolean not null default false`.catch(() => {})
-  await sql`alter table file_prompts add column if not exists is_default_image boolean not null default false`.catch(() => {})
-  await sql`alter table file_prompts add column if not exists is_default_audio boolean not null default false`.catch(() => {})
+  await sql`alter table config.file_prompts drop column if exists file_type`.catch(() => {})
+  await sql`alter table config.file_prompts add column if not exists is_default_document boolean not null default false`.catch(() => {})
+  await sql`alter table config.file_prompts add column if not exists is_default_image boolean not null default false`.catch(() => {})
+  await sql`alter table config.file_prompts add column if not exists is_default_audio boolean not null default false`.catch(() => {})
   schemaReady = true
 }
 
 async function seedDefaultsIfEmpty() {
   const sql = getSql() as any
-  const rows = await sql`select count(*) as cnt from file_prompts`
+  const rows = await sql`select count(*) as cnt from config.file_prompts`
   const count = Number(rows[0]?.cnt ?? 0)
   if (count > 0) return
   for (const d of DEFAULTS) {
     await sql`
-      insert into file_prompts (text, is_default_document, is_default_image, is_default_audio)
+      insert into config.file_prompts (text, is_default_document, is_default_image, is_default_audio)
       values (${d.text}, ${d.is_default_document ?? false}, ${d.is_default_image ?? false}, ${d.is_default_audio ?? false})
     `
   }
@@ -71,7 +71,7 @@ async function ensureAudioDefault() {
   const defaultAudioPrompt = defaultPromptForFileType('audio')
   const rows = await sql`
     select id, text
-    from file_prompts
+    from config.file_prompts
     where is_default_audio = true
     order by updated_at desc
     limit 1
@@ -79,7 +79,7 @@ async function ensureAudioDefault() {
   const current = rows[0]
   if (current?.text === 'Perform speech to text on this audio file, reply with only the text') {
     await sql`
-      update file_prompts
+      update config.file_prompts
       set text = ${defaultAudioPrompt},
           updated_at = now()
       where id = ${current.id}
@@ -88,16 +88,16 @@ async function ensureAudioDefault() {
   }
   if (current?.text && !String(current.text).toLowerCase().includes('document')) return
 
-  await sql`update file_prompts set is_default_audio = false where is_default_audio = true`
+  await sql`update config.file_prompts set is_default_audio = false where is_default_audio = true`
   const matching = await sql`
     select id
-    from file_prompts
+    from config.file_prompts
     where text = ${defaultAudioPrompt}
     limit 1
   `
   if (matching[0]?.id) {
     await sql`
-      update file_prompts
+      update config.file_prompts
       set is_default_audio = true,
           updated_at = now()
       where id = ${matching[0].id}
@@ -105,16 +105,16 @@ async function ensureAudioDefault() {
     return
   }
   await sql`
-    insert into file_prompts (text, is_default_audio)
+    insert into config.file_prompts (text, is_default_audio)
     values (${defaultAudioPrompt}, true)
   `
 }
 
 async function ensureDefaultUniqueness(sql: any, type: string, excludeId?: number) {
   if (excludeId) {
-    await sql.query(`update file_prompts set ${type} = false where ${type} = true and id != $1`, [excludeId])
+    await sql.query(`update config.file_prompts set ${type} = false where ${type} = true and id != $1`, [excludeId])
   } else {
-    await sql.query(`update file_prompts set ${type} = false where ${type} = true`)
+    await sql.query(`update config.file_prompts set ${type} = false where ${type} = true`)
   }
 }
 
@@ -126,7 +126,7 @@ export async function listFilePrompts(): Promise<FilePrompt[]> {
   const sql = getSql() as any
   const rows = await sql`
     select id, text, is_default_document, is_default_image, is_default_audio, created_at, updated_at
-    from file_prompts
+    from config.file_prompts
     order by id asc
   `
   return rows as FilePrompt[]
@@ -140,7 +140,7 @@ export async function getDefaults(): Promise<FilePromptDefaults> {
   const sql = getSql() as any
   const rows: any[] = await sql`
     select id, text, is_default_document, is_default_image, is_default_audio
-    from file_prompts
+    from config.file_prompts
     where is_default_document = true or is_default_image = true or is_default_audio = true
   `
   return {
@@ -160,7 +160,7 @@ export async function createFilePrompt(input: FilePromptInput): Promise<FileProm
   }
 
   const rows = await sql`
-    insert into file_prompts (text, is_default_document, is_default_image, is_default_audio)
+    insert into config.file_prompts (text, is_default_document, is_default_image, is_default_audio)
     values (${input.text}, ${input.is_default_document ?? false}, ${input.is_default_image ?? false}, ${input.is_default_audio ?? false})
     returning id, text, is_default_document, is_default_image, is_default_audio, created_at, updated_at
   `
@@ -176,7 +176,7 @@ export async function updateFilePrompt(id: number, input: FilePromptInput): Prom
   }
 
   const rows = await sql`
-    update file_prompts
+    update config.file_prompts
     set text = ${input.text},
         is_default_document = ${input.is_default_document ?? false},
         is_default_image = ${input.is_default_image ?? false},
@@ -192,7 +192,7 @@ export async function deleteFilePrompt(id: number): Promise<boolean> {
   if (shouldUseLocalPersistence()) return deleteLocalFilePrompt(id)
   const sql = getSql() as any
   const rows = await sql`
-    delete from file_prompts where id = ${id}
+    delete from config.file_prompts where id = ${id}
     returning id
   `
   return rows.length > 0

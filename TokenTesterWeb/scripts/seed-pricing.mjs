@@ -47,7 +47,7 @@ for (const row of rows) {
   }
 
   await sql`
-    insert into model_price_records (
+    insert into pricing.model_price_records (
       service_provider,
       model_id,
       upstream_provider,
@@ -103,7 +103,7 @@ for (const row of rows) {
   `
 
   await sql`
-    insert into model_prices (
+    insert into pricing.model_prices (
       service_provider,
       model_id,
       upstream_provider,

@@ -59,7 +59,7 @@ async function ensureRunResultsSchema() {
   if (schemaReady) return
   const sql = getSql()
   await sql`
-    create table if not exists run_results (
+    create table if not exists results.run_results (
       id bigserial primary key,
       run_id text not null unique,
       record_key text,
@@ -113,34 +113,34 @@ async function ensureRunResultsSchema() {
       updated_at timestamptz not null default now()
     )
   `
-  await sql`alter table run_results add column if not exists suppressed boolean not null default false`
-  await sql`alter table run_results add column if not exists record_key text`
-  await sql`alter table run_results add column if not exists pdf_sent boolean not null default false`
-  await sql`alter table run_results add column if not exists pdf_file_size bigint`
-  await sql`alter table run_results add column if not exists image_sent boolean not null default false`
-  await sql`alter table run_results add column if not exists image_file_size bigint`
-  await sql`alter table run_results add column if not exists video_sent boolean not null default false`
-  await sql`alter table run_results add column if not exists video_file_size bigint`
-  await sql`alter table run_results add column if not exists audio_sent boolean not null default false`
-  await sql`alter table run_results add column if not exists audio_file_size bigint`
-  await sql`alter table run_results add column if not exists run_name text`
-  await sql`alter table run_results add column if not exists document_category text`
-  await sql`alter table run_results add column if not exists document_category_confidence numeric(5, 4)`
-  await sql`alter table run_results add column if not exists document_category_source text`
+  await sql`alter table results.run_results add column if not exists suppressed boolean not null default false`
+  await sql`alter table results.run_results add column if not exists record_key text`
+  await sql`alter table results.run_results add column if not exists pdf_sent boolean not null default false`
+  await sql`alter table results.run_results add column if not exists pdf_file_size bigint`
+  await sql`alter table results.run_results add column if not exists image_sent boolean not null default false`
+  await sql`alter table results.run_results add column if not exists image_file_size bigint`
+  await sql`alter table results.run_results add column if not exists video_sent boolean not null default false`
+  await sql`alter table results.run_results add column if not exists video_file_size bigint`
+  await sql`alter table results.run_results add column if not exists audio_sent boolean not null default false`
+  await sql`alter table results.run_results add column if not exists audio_file_size bigint`
+  await sql`alter table results.run_results add column if not exists run_name text`
+  await sql`alter table results.run_results add column if not exists document_category text`
+  await sql`alter table results.run_results add column if not exists document_category_confidence numeric(5, 4)`
+  await sql`alter table results.run_results add column if not exists document_category_source text`
   await sql`
-    update run_results
+    update results.run_results
     set record_key = concat_ws('|', service_provider, model, input_hash)
     where record_key is null
   `
-  await sql`alter table run_results alter column record_key set not null`
-  await sql`create index if not exists run_results_completed_idx on run_results (completed_at desc)`
-  await sql`create index if not exists run_results_created_idx on run_results (created_at desc)`
-  await sql`create index if not exists run_results_provider_model_idx on run_results (service_provider, model, completed_at desc)`
-  await sql`create index if not exists run_results_status_idx on run_results (status, completed_at desc)`
-  await sql`create index if not exists run_results_input_hash_idx on run_results (input_hash)`
-  await sql`create index if not exists run_results_file_hash_idx on run_results (file_hash)`
-  await sql`create index if not exists run_results_suppressed_idx on run_results (suppressed, completed_at desc)`
-  await sql`create index if not exists run_results_record_key_idx on run_results (record_key, completed_at desc, created_at desc)`
+  await sql`alter table results.run_results alter column record_key set not null`
+  await sql`create index if not exists results.run_results_completed_idx on results.run_results (completed_at desc)`
+  await sql`create index if not exists results.run_results_created_idx on results.run_results (created_at desc)`
+  await sql`create index if not exists results.run_results_provider_model_idx on results.run_results (service_provider, model, completed_at desc)`
+  await sql`create index if not exists results.run_results_status_idx on results.run_results (status, completed_at desc)`
+  await sql`create index if not exists results.run_results_input_hash_idx on results.run_results (input_hash)`
+  await sql`create index if not exists results.run_results_file_hash_idx on results.run_results (file_hash)`
+  await sql`create index if not exists results.run_results_suppressed_idx on results.run_results (suppressed, completed_at desc)`
+  await sql`create index if not exists results.run_results_record_key_idx on results.run_results (record_key, completed_at desc, created_at desc)`
   schemaReady = true
 }
 
@@ -158,7 +158,7 @@ export async function saveRunResult(input: RunResultInput) {
   const runStartedAt = input.runStartedAt ? new Date(input.runStartedAt).toISOString() : null
 
   await sql`
-    insert into run_results (
+    insert into results.run_results (
       run_id,
       record_key,
       run_name,
@@ -376,7 +376,7 @@ export async function getRunResults(limit = 1000) {
       completed_at,
       created_at,
       updated_at
-    from run_results
+    from results.run_results
     order by completed_at desc
     limit ${safeLimit}
   `
@@ -394,7 +394,7 @@ export async function updateRunResultsSuppressed(ids: number[], suppressed: bool
   if (normalizedIds.length === 0) return { updated: 0 }
   const sql = getSql()
   const rows = await sql`
-    update run_results
+    update results.run_results
     set suppressed = ${suppressed}, updated_at = now()
     where id = any(${normalizedIds}::bigint[])
     returning id
@@ -409,7 +409,7 @@ export async function deleteRunResults(ids: number[]) {
   if (normalizedIds.length === 0) return { deleted: 0 }
   const sql = getSql()
   const rows = await sql`
-    delete from run_results
+    delete from results.run_results
     where id = any(${normalizedIds}::bigint[])
     returning id
   `

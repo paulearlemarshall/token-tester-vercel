@@ -12,7 +12,7 @@ async function ensureModelPresetSchema() {
   if (schemaReady) return
   const sql = getSql() as any
   await sql`
-    create table if not exists model_presets (
+    create table if not exists config.model_presets (
       id bigserial primary key,
       name text not null,
       models jsonb not null default '[]'::jsonb,
@@ -20,7 +20,7 @@ async function ensureModelPresetSchema() {
       updated_at timestamptz not null default now()
     )
   `
-  await sql`create unique index if not exists model_presets_name_lower_idx on model_presets (lower(name))`
+  await sql`create unique index if not exists config.model_presets_name_lower_idx on config.model_presets (lower(name))`
   schemaReady = true
 }
 
@@ -51,7 +51,7 @@ export async function listModelPresets(): Promise<ModelPreset[]> {
   const sql = getSql() as any
   const rows = await sql`
     select id, name, models, created_at, updated_at
-    from model_presets
+    from config.model_presets
     order by lower(name) asc
   `
   return rows.map(rowToPreset)
@@ -65,13 +65,13 @@ export async function upsertModelPreset(input: ModelPresetInput): Promise<ModelP
   const sql = getSql() as any
   const existing = await sql`
     select id
-    from model_presets
+    from config.model_presets
     where lower(name) = lower(${name})
     limit 1
   `
   const rows = existing[0]?.id
     ? await sql`
-        update model_presets
+        update config.model_presets
         set name = ${name},
             models = ${JSON.stringify(models)}::jsonb,
             updated_at = now()
@@ -79,7 +79,7 @@ export async function upsertModelPreset(input: ModelPresetInput): Promise<ModelP
         returning id, name, models, created_at, updated_at
       `
     : await sql`
-        insert into model_presets (name, models)
+        insert into config.model_presets (name, models)
         values (${name}, ${JSON.stringify(models)}::jsonb)
         returning id, name, models, created_at, updated_at
       `
@@ -90,7 +90,7 @@ export async function deleteModelPreset(id: number): Promise<boolean> {
   await ensureModelPresetSchema()
   const sql = getSql() as any
   const rows = await sql`
-    delete from model_presets
+    delete from config.model_presets
     where id = ${id}
     returning id
   `

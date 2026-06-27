@@ -65,7 +65,7 @@ export async function getPricing() {
         output_per_1m,
         source_priority,
         updated_at
-      from model_price_records
+      from pricing.model_price_records
       union all
       select
         service_provider,
@@ -74,12 +74,12 @@ export async function getPricing() {
         output_per_1m,
         0 as source_priority,
         updated_at
-      from model_prices
+      from pricing.model_prices
       where not exists (
         select 1
-        from model_price_records r
-        where r.service_provider = model_prices.service_provider
-          and r.model_id = model_prices.model_id
+        from pricing.model_price_records r
+        where r.service_provider = pricing.model_prices.service_provider
+          and r.model_id = pricing.model_prices.model_id
       )
     )
     select distinct on (service_provider, model_id)
@@ -127,7 +127,7 @@ export async function getPricingRecords() {
         match_evidence,
         updated_at,
         last_seen_at
-      from model_price_records
+      from pricing.model_price_records
       union all
       select
         null as id,
@@ -150,12 +150,12 @@ export async function getPricingRecords() {
         null::jsonb as match_evidence,
         updated_at,
         updated_at as last_seen_at
-      from model_prices
+      from pricing.model_prices
       where not exists (
         select 1
-        from model_price_records r
-        where r.service_provider = model_prices.service_provider
-          and r.model_id = model_prices.model_id
+        from pricing.model_price_records r
+        where r.service_provider = pricing.model_prices.service_provider
+          and r.model_id = pricing.model_prices.model_id
       )
     ),
     ranked as (
@@ -231,7 +231,7 @@ export async function upsertModelPrice(input: ModelPriceInput) {
 
   const sql = getSql()
   await sql`
-    insert into model_price_records (
+    insert into pricing.model_price_records (
       service_provider,
       model_id,
       upstream_provider,
@@ -290,7 +290,7 @@ export async function upsertModelPrice(input: ModelPriceInput) {
   `
 
   await sql`
-    insert into model_prices (
+    insert into pricing.model_prices (
       service_provider,
       model_id,
       upstream_provider,
@@ -332,7 +332,7 @@ export async function deleteModelPriceRecord(input: DeletePriceRecordInput) {
 
   if (Number.isFinite(input.id)) {
     deleted = await sql`
-      delete from model_price_records
+      delete from pricing.model_price_records
       where id = ${input.id}
       returning service_provider, model_id
     ` as any[]
@@ -346,7 +346,7 @@ export async function deleteModelPriceRecord(input: DeletePriceRecordInput) {
 
     if (source) {
       deleted = await sql`
-        delete from model_price_records
+        delete from pricing.model_price_records
         where service_provider = ${serviceProvider}
           and model_id = ${modelId}
           and source = ${source}
@@ -356,7 +356,7 @@ export async function deleteModelPriceRecord(input: DeletePriceRecordInput) {
 
     if (deleted.length === 0) {
       deleted = await sql`
-        delete from model_prices
+        delete from pricing.model_prices
         where service_provider = ${serviceProvider}
           and model_id = ${modelId}
         returning service_provider, model_id
@@ -412,7 +412,7 @@ async function syncEffectiveModelPrice(serviceProvider: string, modelId: string)
       input_per_1m,
       output_per_1m,
       source
-    from model_price_records
+    from pricing.model_price_records
     where service_provider = ${serviceProvider}
       and model_id = ${modelId}
     order by source_priority desc, updated_at desc
@@ -422,7 +422,7 @@ async function syncEffectiveModelPrice(serviceProvider: string, modelId: string)
   const next = rows[0]
   if (!next) {
     await sql`
-      delete from model_prices
+      delete from pricing.model_prices
       where service_provider = ${serviceProvider}
         and model_id = ${modelId}
     `
@@ -430,7 +430,7 @@ async function syncEffectiveModelPrice(serviceProvider: string, modelId: string)
   }
 
   await sql`
-    insert into model_prices (
+    insert into pricing.model_prices (
       service_provider,
       model_id,
       upstream_provider,
