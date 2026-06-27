@@ -1,14 +1,18 @@
 import type { NormalizedAttachment, NormalizedRunInput } from '../run-input'
 import { textWithAttachmentLabels } from '../message-builders'
 import type { ApiResult } from './shared'
-import { parseHeaders } from './shared'
+import { parseHeaders, shouldUseTranscription } from './shared'
 
 export const ADAPTER_ID = 'xai' as const
 
 export async function adapterDispatch(
   baseUrl: string, apiKey: string, model: string, inputRun: NormalizedRunInput,
-  maxTokens: number, extraHeaders?: string
+  maxTokens: number, extraHeaders?: string,
+  modelMetas?: { id: string; outputModalities?: string[] }[]
 ): Promise<ApiResult> {
+  if (shouldUseTranscription(model, inputRun, modelMetas)) {
+    return transcribeXaiOnly(baseUrl, apiKey, inputRun, extraHeaders)
+  }
   const url = `${baseUrl.replace(/\/+$/, '')}/v1/responses`
   const { inputRun: responseInput, transcriptions } = await transcribeXaiAudioAttachments(inputRun, baseUrl, apiKey, extraHeaders)
   const input = await buildXaiResponsesInput(responseInput, baseUrl, apiKey, extraHeaders)
@@ -40,6 +44,30 @@ export async function adapterDispatch(
     responsePayload: transcriptions.length > 0
       ? { stt: transcriptions.map(t => t.responsePayload), responses: data }
       : data,
+  }
+}
+
+async function transcribeXaiOnly(
+  baseUrl: string, apiKey: string, inputRun: NormalizedRunInput, extraHeaders?: string
+): Promise<ApiResult> {
+  const audioAttachments = inputRun.attachments.filter(a => a.kind === 'audio' && a.base64)
+  if (audioAttachments.length === 0) throw new Error('xAI transcription requires at least one audio attachment')
+  const transcriptions = await Promise.all(
+    audioAttachments.map(a => transcribeXaiAudioAttachment(baseUrl, apiKey, a, extraHeaders))
+  )
+  const responseText = transcriptions.map(t => {
+    if (transcriptions.length === 1) return t.text
+    return `--- ${t.filename} ---\n${t.text}`
+  }).filter(Boolean).join('\n\n')
+  return {
+    inputTokens: 0,
+    outputTokens: 0,
+    totalTokens: 0,
+    responseText,
+    error: responseText ? undefined : 'xAI transcription returned no text. Inspect the raw response payload for details.',
+    requestPayload: { stt: transcriptions.map(t => t.requestPayload) },
+    requestUrl: `${baseUrl.replace(/\/+$/, '')}/v1/stt`,
+    responsePayload: transcriptions.map(t => t.responsePayload),
   }
 }
 

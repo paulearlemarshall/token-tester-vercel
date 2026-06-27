@@ -191,7 +191,7 @@ export async function chatCompletion(params: ChatParams) {
     const wrapped = await runWithLogging(caller, async () => {
       switch (adapter.id) {
         case 'xai':
-          return await xai.adapterDispatch(provider.baseUrl, apiKey, model, input, maxTokens, provider.headers)
+          return await xai.adapterDispatch(provider.baseUrl, apiKey, model, input, maxTokens, provider.headers, provider.modelMetas as any)
         case 'anthropic':
           return await anthropicAdapter.adapterDispatch(apiKey, model, input, maxTokens)
         case 'gemini':
