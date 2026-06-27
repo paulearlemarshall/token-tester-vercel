@@ -543,6 +543,21 @@ export function ModelsTab() {
                           )
                         })()}
                       </button>
+<button
+                        onClick={e => { e.stopPropagation(); toggleAllModels(prov.id, true) }}
+                        className="text-xs text-surface-400 hover:text-surface-200"
+                      >All</button>
+                      <button
+                        onClick={e => { e.stopPropagation(); toggleAllModels(prov.id, false) }}
+                        className="text-xs text-surface-400 hover:text-surface-200"
+                      >None</button>
+                    </>
+                  )}
+                </div>
+
+                {isExpanded && (
+                  <div className="border-t border-surface-700">
+                    <div className="space-y-2 border-b border-surface-800 px-3 py-3">
                       {(() => {
                         const filters = new Map<string, string>()
                         for (const m of (prov.modelMetas || [])) {
@@ -559,6 +574,7 @@ export function ModelsTab() {
                             })
                           }
                         }
+                        if (filters.size === 0) return null
                         const activeMod = modalityFilters[prov.id]
                         const modColors: Record<string, string> = {
                           image: 'bg-brand-gold/15 text-brand-gold border-brand-gold/40 active:bg-brand-gold/30',
@@ -567,35 +583,25 @@ export function ModelsTab() {
                           'out:transcription': 'bg-emerald-500/15 text-emerald-300 border-emerald-500/40',
                           text: 'bg-brand-blue/15 text-brand-blue border-brand-blue/40 active:bg-brand-blue/30 dark:text-brand-gold',
                         }
-                        return Array.from(filters.entries()).map(([mod, label]) => (
-                          <button
-                            key={mod}
-                            onClick={e => { e.stopPropagation(); setModalityFilters(s => ({ ...s, [prov.id]: activeMod === mod ? null : mod })) }}
-                            className={`text-xs shrink-0 rounded-full px-2.5 py-0.5 border transition-all font-medium ${
-                              activeMod === mod
-                                ? (modColors[mod] || 'bg-brand-blue/15 text-brand-blue border-brand-blue/40 dark:text-brand-gold')
-                                : 'bg-transparent text-surface-500 border-surface-600 hover:text-surface-300 hover:border-surface-500'
-                            }`}
-                          >
-                            {label}
-                          </button>
-                        ))
+                        return (
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="text-xs font-medium text-surface-400">Modality</span>
+                            {Array.from(filters.entries()).map(([mod, label]) => (
+                              <button
+                                key={mod}
+                                onClick={e => { e.stopPropagation(); setModalityFilters(s => ({ ...s, [prov.id]: activeMod === mod ? null : mod })) }}
+                                className={`text-xs shrink-0 rounded-full px-2.5 py-0.5 border transition-all font-medium ${
+                                  activeMod === mod
+                                    ? (modColors[mod] || 'bg-brand-blue/15 text-brand-blue border-brand-blue/40 dark:text-brand-gold')
+                                    : 'bg-transparent text-surface-500 border-surface-600 hover:text-surface-300 hover:border-surface-500'
+                                }`}
+                              >
+                                {label}
+                              </button>
+                            ))}
+                          </div>
+                        )
                       })()}
-                      <button
-                        onClick={e => { e.stopPropagation(); toggleAllModels(prov.id, true) }}
-                        className="text-xs text-surface-400 hover:text-surface-200"
-                      >All</button>
-                      <button
-                        onClick={e => { e.stopPropagation(); toggleAllModels(prov.id, false) }}
-                        className="text-xs text-surface-400 hover:text-surface-200"
-                      >None</button>
-                    </>
-                  )}
-                </div>
-
-                {isExpanded && (
-                  <div className="border-t border-surface-700">
-                    <div className="space-y-2 border-b border-surface-800 px-3 py-3">
                       <div className="flex flex-wrap items-center gap-2">
                         <span className="text-xs font-medium text-surface-400">Good for</span>
                         {availableCapabilities.map(cap => {
