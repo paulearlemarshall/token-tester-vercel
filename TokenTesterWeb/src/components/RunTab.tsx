@@ -535,6 +535,7 @@ export function RunTab() {
         input,
         maxTokens: 4096,
       })
+      if (result.logs) useStore.getState().addLogs(result.logs)
 
       if (result.error && /max_tokens.*max_completion_tokens/i.test(result.error)) {
         result = await webApi.chatCompletion({
@@ -543,6 +544,7 @@ export function RunTab() {
           input,
           maxTokens: 4096,
         })
+        if (result.logs) useStore.getState().addLogs(result.logs)
       }
 
       if (result.error && /invalid.*(mime|image|format)|file.*data.*missing|unknown variant.*(image_url|file)|expected `text`/i.test(result.error)) {

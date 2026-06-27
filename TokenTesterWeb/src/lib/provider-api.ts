@@ -9,6 +9,7 @@ import * as openrouter from './adapters/openrouter'
 import * as anthropicAdapter from './adapters/anthropic'
 import * as geminiAdapter from './adapters/gemini'
 import { chatOpenAICompat } from './adapters/openai-compat'
+import { runWithLogging } from './api-logger'
 
 export { parseHeaders, shouldUseTranscription }
 
@@ -182,44 +183,45 @@ export async function chatCompletion(params: ChatParams) {
 
   const start = performance.now()
 
+  let logs: import('./api-logger').LogEntry[] = []
   try {
     let result: ApiResult
     const adapter = getProviderAdapter(provider)
+    const caller = `${provider.adapterId ?? provider.type}/${model}`
 
-    switch (adapter.id) {
-      case 'xai':
-        result = await xai.adapterDispatch(provider.baseUrl, apiKey, model, input, maxTokens, provider.headers)
-        break
-      case 'anthropic':
-        result = await anthropicAdapter.adapterDispatch(apiKey, model, input, maxTokens)
-        break
-      case 'gemini':
-        result = await geminiAdapter.adapterDispatch(apiKey, model, input, maxTokens)
-        break
-      case 'deepseek':
-      case 'mistral':
-      case 'ssnc-ai-gateway':
-      case 'custom-openai-compatible':
-        result = await chatOpenAICompat(provider.baseUrl, apiKey, model, input, maxTokens, provider.headers)
-        break
-      case 'openai':
-        result = await openai.adapterDispatch(provider.baseUrl, apiKey, model, input, maxTokens, provider.headers, provider.modelMetas as any)
-        break
-      case 'openrouter':
-        result = await openrouter.adapterDispatch(provider.baseUrl, apiKey, model, input, maxTokens, provider.headers, provider.modelMetas as any)
-        break
-      default:
-        throw new Error(`Unknown provider adapter: ${adapter.id}`)
-    }
+    const wrapped = await runWithLogging(caller, async () => {
+      switch (adapter.id) {
+        case 'xai':
+          return await xai.adapterDispatch(provider.baseUrl, apiKey, model, input, maxTokens, provider.headers)
+        case 'anthropic':
+          return await anthropicAdapter.adapterDispatch(apiKey, model, input, maxTokens)
+        case 'gemini':
+          return await geminiAdapter.adapterDispatch(apiKey, model, input, maxTokens)
+        case 'deepseek':
+        case 'mistral':
+        case 'ssnc-ai-gateway':
+        case 'custom-openai-compatible':
+          return await chatOpenAICompat(provider.baseUrl, apiKey, model, input, maxTokens, provider.headers)
+        case 'openai':
+          return await openai.adapterDispatch(provider.baseUrl, apiKey, model, input, maxTokens, provider.headers, provider.modelMetas as any)
+        case 'openrouter':
+          return await openrouter.adapterDispatch(provider.baseUrl, apiKey, model, input, maxTokens, provider.headers, provider.modelMetas as any)
+        default:
+          throw new Error(`Unknown provider adapter: ${adapter.id}`)
+      }
+    })
 
+    result = wrapped.result
+    logs = wrapped.logs
     const latencyMs = Math.round(performance.now() - start)
-    return { ...result, latencyMs }
+    return { ...result, logs, latencyMs }
   } catch (err: any) {
     return {
       inputTokens: 0,
       outputTokens: 0,
       totalTokens: 0,
       responseText: '',
+      logs,
       latencyMs: Math.round(performance.now() - start),
       error: err.message ?? String(err),
     }

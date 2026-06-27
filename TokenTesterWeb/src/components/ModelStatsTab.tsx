@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
-import { ArrowDown, ArrowUp, BarChart3, Database, RefreshCw, Search } from 'lucide-react'
+import { ArrowDown, ArrowUp, BarChart3, Database, RefreshCw, Search, Terminal } from 'lucide-react'
 import { buildModelStatsRows, type ModelStatsRow } from '../lib/model-stats'
 import { formatCurrency, formatDuration, formatFileSize, formatNumber } from '../utils/formatters'
 import { useStore } from '../store'
 import * as XLSX from 'xlsx'
+import { LogViewer } from './LogViewer'
 
 type SortField = keyof Pick<ModelStatsRow,
   'providerName' | 'model' | 'documentCategory' | 'documentType' | 'runs' | 'successRate' |
@@ -17,6 +18,7 @@ export function ModelStatsTab() {
     archivedRecordsLoading: loading,
     loadArchivedRecords,
   } = useStore()
+  const [view, setView] = useState<'stats' | 'log'>('stats')
   const [query, setQuery] = useState('')
   const [provider, setProvider] = useState('')
   const [model, setModel] = useState('')
@@ -128,12 +130,22 @@ export function ModelStatsTab() {
           <p className="text-sm text-surface-400 mt-1">Archive-level model performance grouped by provider, model, category, and document type.</p>
         </div>
         <div className="flex items-center gap-2">
-          <button onClick={exportModelStatsXLSX} disabled={sortedRows.length === 0} className="btn-secondary flex items-center gap-1.5">
-            <Database size={14} /> Export XLS
+          <button
+            onClick={() => setView(view === 'stats' ? 'log' : 'stats')}
+            className={`btn-secondary flex items-center gap-1.5 ${view === 'log' ? 'ring-1 ring-brand-gold' : ''}`}
+          >
+            <Terminal size={14} /> Log
           </button>
-          <button onClick={() => loadArchivedRecords(5000, true)} disabled={loading} className="btn-secondary flex items-center gap-1.5">
-            <RefreshCw size={16} className={loading ? 'animate-spin' : ''} /> Refresh
-          </button>
+          {view === 'stats' && (
+            <>
+              <button onClick={exportModelStatsXLSX} disabled={sortedRows.length === 0} className="btn-secondary flex items-center gap-1.5">
+                <Database size={14} /> Export XLS
+              </button>
+              <button onClick={() => loadArchivedRecords(5000, true)} disabled={loading} className="btn-secondary flex items-center gap-1.5">
+                <RefreshCw size={16} className={loading ? 'animate-spin' : ''} /> Refresh
+              </button>
+            </>
+          )}
         </div>
       </div>
 
@@ -143,6 +155,12 @@ export function ModelStatsTab() {
         <Metric label="Total Cost" value={formatCurrency(summary.totalCost)} />
       </div>
 
+      {view === 'log' ? (
+        <div className="card p-3">
+          <LogViewer />
+        </div>
+      ) : (
+        <>
       <div className="card flex flex-wrap items-center gap-3">
         <div className="relative min-w-64 flex-1">
           <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-surface-500" />
@@ -202,6 +220,8 @@ export function ModelStatsTab() {
           </table>
         </div>
       </div>
+        </>
+      )}
     </div>
   )
 }

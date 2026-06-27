@@ -1,3 +1,4 @@
+import type { LogEntry } from '../api-logger'
 import type { NormalizedRunInput } from '../run-input'
 
 export interface ApiResult {
@@ -9,6 +10,7 @@ export interface ApiResult {
   requestPayload?: unknown
   requestUrl?: string
   responsePayload?: unknown
+  logs?: LogEntry[]
 }
 
 export function parseHeaders(raw?: string): Record<string, string> {
