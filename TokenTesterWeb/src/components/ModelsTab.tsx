@@ -378,18 +378,6 @@ export function ModelsTab() {
     return list
   }
 
-  function updateModelPrice(provider: ProviderKeyInput, modelId: string, input: number, output: number) {
-    const providerKey = canonicalProviderKey(provider)
-    setModelPricing(`${providerKey}/${modelId}`, input, output)
-    webApi.savePricing({
-      serviceProvider: providerKey,
-      modelId,
-      input,
-      output,
-      displayName: modelId,
-    }).catch(err => console.error('Failed to save model pricing', err))
-  }
-
   const selectedRows = selectedModelRows()
   const sortedSelectedRows = sortSelectedModelRows(selectedRows)
 
@@ -688,32 +676,6 @@ export function ModelsTab() {
                                     {CAPABILITY_LABELS[cap]}
                                   </span>
                                 ))}
-                              </div>
-                            </div>
-                            <div className="flex gap-1 mt-2" onClick={e => e.stopPropagation()}>
-                              <div className="flex-1 min-w-0">
-                                <label className="text-[9px] text-surface-400 block leading-tight">In $/M</label>
-                                <input
-                                  type="number"
-                                  min={0}
-                                  step={0.01}
-                                  value={pricing.input || ''}
-                                  onChange={e => updateModelPrice(prov, model, parseFloat(e.target.value) || 0, pricing.output)}
-                                  className="w-full bg-surface-800 border border-surface-600 rounded text-[10px] px-1 py-0.5 text-surface-100 focus:outline-none focus:ring-1 focus:ring-brand-gold"
-                                  placeholder="0"
-                                />
-                              </div>
-                              <div className="flex-1 min-w-0">
-                                <label className="text-[9px] text-surface-400 block leading-tight">Out $/M</label>
-                                <input
-                                  type="number"
-                                  min={0}
-                                  step={0.01}
-                                  value={pricing.output || ''}
-                                  onChange={e => updateModelPrice(prov, model, pricing.input, parseFloat(e.target.value) || 0)}
-                                  className="w-full bg-surface-800 border border-surface-600 rounded text-[10px] px-1 py-0.5 text-surface-100 focus:outline-none focus:ring-1 focus:ring-brand-gold"
-                                  placeholder="0"
-                                />
                               </div>
                             </div>
                           </div>
