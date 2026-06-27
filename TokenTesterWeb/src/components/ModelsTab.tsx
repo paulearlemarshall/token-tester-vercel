@@ -14,6 +14,7 @@ type SelectedModelRow = {
   model: string
   available: boolean
   pricing: { input: number; output: number }
+  meta: any
 }
 
 function usesCompletionTokensParam(model: string): boolean {
@@ -218,6 +219,7 @@ export function ModelsTab() {
         model,
         available: provider.models.includes(model),
         pricing: effectivePricing(provider, model),
+        meta: provider.modelMetas?.find((m: any) => m.id === model),
       }))
     )
   }
@@ -713,9 +715,24 @@ export function ModelsTab() {
                 {sortedSelectedRows.map(row => (
                   <tr key={`${row.provider.id}:${row.model}`} className={`border-t border-surface-800 ${row.available ? 'text-surface-200' : 'bg-red-950/20 text-red-200'}`}>
                     <td className="px-4 py-2">{row.provider.name}</td>
-                    <td className="px-4 py-2 font-mono">
-                      {row.model}
-                      {!row.available && <span className="ml-2 rounded border border-red-700/60 px-1.5 py-0.5 text-[10px] font-semibold text-red-300">missing</span>}
+                    <td className="px-4 py-2">
+                      <div className="font-mono">{row.model}</div>
+                      {!row.available && <span className="rounded border border-red-700/60 px-1.5 py-0.5 text-[10px] font-semibold text-red-300">missing</span>}
+                      {row.meta && (
+                        <div className="flex flex-wrap items-center gap-1.5 mt-1">
+                          {row.meta.owned_by && <span className="text-[10px] text-surface-500">by {row.meta.owned_by}</span>}
+                          {row.meta.context_length && <span className="text-[10px] text-surface-500">ctx {(row.meta.context_length / 1000).toFixed(0)}k</span>}
+                          {(() => {
+                            const caps = inferModelCapabilities(row.model, row.meta, row.pricing)
+                            if (caps.length === 0) return null
+                            return caps.map(cap => (
+                              <span key={cap} className={`rounded-full border px-1.5 py-0.5 text-[9px] font-semibold leading-none ${CAPABILITY_STYLES[cap]}`}>
+                                {CAPABILITY_LABELS[cap]}
+                              </span>
+                            ))
+                          })()}
+                        </div>
+                      )}
                     </td>
                     <td className="px-4 py-2 text-right font-mono">{row.pricing.input || 0}</td>
                     <td className="px-4 py-2 text-right font-mono">{row.pricing.output || 0}</td>
