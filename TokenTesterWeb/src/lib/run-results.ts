@@ -323,7 +323,7 @@ export async function getRunResults(limit = 1000) {
   await ensureRunResultsSchema()
   const sql = getSql()
   const safeLimit = Math.min(Math.max(Math.trunc(limit) || 1000, 1), 5000)
-  const rows = await sql`
+  const rows = await sql.query(`
     select
       id,
       run_id,
@@ -379,8 +379,8 @@ export async function getRunResults(limit = 1000) {
       updated_at
     from results.run_results
     order by completed_at desc
-    limit ${safeLimit}
-  `
+    limit $1
+  `, [safeLimit])
 
   return {
     records: (rows as any[]).map(rowToRunResult),
