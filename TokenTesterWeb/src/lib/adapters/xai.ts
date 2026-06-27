@@ -1,7 +1,7 @@
 import type { NormalizedAttachment, NormalizedRunInput } from '../run-input'
 import { textWithAttachmentLabels } from '../message-builders'
 import type { ApiResult } from './shared'
-import { parseHeaders, shouldUseTranscription } from './shared'
+import { parseHeaders } from './shared'
 
 export const ADAPTER_ID = 'xai' as const
 
@@ -10,7 +10,9 @@ export async function adapterDispatch(
   maxTokens: number, extraHeaders?: string,
   modelMetas?: { id: string; outputModalities?: string[] }[]
 ): Promise<ApiResult> {
-  if (shouldUseTranscription(model, inputRun, modelMetas)) {
+  const hasAudio = inputRun.attachments.some(a => a.kind === 'audio')
+  const hasNonAudio = inputRun.attachments.some(a => a.kind !== 'audio' && a.kind !== 'text')
+  if (hasAudio && !hasNonAudio) {
     return transcribeXaiOnly(baseUrl, apiKey, inputRun, extraHeaders)
   }
   const url = `${baseUrl.replace(/\/+$/, '')}/v1/responses`
