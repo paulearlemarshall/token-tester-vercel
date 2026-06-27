@@ -665,7 +665,7 @@ export function ModelsTab() {
                               className="cursor-pointer"
                             >
                               <div className="flex items-start justify-between mb-1">
-                                <span className={`text-xs font-mono font-medium leading-tight ${selected ? 'text-brand-blue dark:text-brand-gold' : 'text-surface-400'}`}>
+                                <span className={`text-xs font-mono font-medium leading-tight truncate ${selected ? 'text-brand-blue dark:text-brand-gold' : 'text-surface-400'}`} title={model}>
                                   {model.length > 28 ? model.slice(0, 26) + '...' : model}
                                 </span>
                                 {selected ? (
