@@ -320,16 +320,10 @@ export async function saveRunResult(input: RunResultInput) {
 
 export async function getRunResults(limit = 1000) {
   if (shouldUseLocalPersistence()) return getLocalRunResults(limit)
-  try { await ensureRunResultsSchema() } catch (e: any) {
-    const msg = `ensureSchema: ${e.message ?? e}`
-    console.error(msg)
-    return { records: [], generatedAt: new Date().toISOString(), error: msg }
-  }
+  await ensureRunResultsSchema()
   const sql = getSql()
   const safeLimit = Math.min(Math.max(Math.trunc(limit) || 1000, 1), 5000)
-  let rows: any
-  try {
-    rows = await sql.query(`
+  const rows = await sql.query(`
     select
       id,
       run_id,
@@ -387,11 +381,6 @@ export async function getRunResults(limit = 1000) {
     order by completed_at desc
     limit $1
   `, [safeLimit])
-  } catch (e: any) {
-    const msg = `select: ${e.message ?? e}`
-    console.error(msg)
-    return { records: [], generatedAt: new Date().toISOString(), error: msg }
-  }
 
   return {
     records: (rows as any[]).map(rowToRunResult),

@@ -9,17 +9,7 @@ export async function GET(request: Request) {
     const limit = Number(url.searchParams.get('limit') ?? 1000)
     return NextResponse.json(await getRunResults(limit))
   } catch (err: any) {
-    const detail = {
-      message: err.message ?? String(err),
-      code: err.code,
-      severity: err.severity,
-      detail: err.detail,
-      hint: err.hint,
-      position: err.position,
-      sourceError: err.sourceError ? String(err.sourceError).slice(0, 500) : undefined,
-    }
-    console.error('GET /api/results error:', JSON.stringify(detail))
-    return NextResponse.json({ error: err.message ?? String(err), records: [], _detail: detail }, { status: 503 })
+    return NextResponse.json({ error: err.message ?? String(err), records: [] }, { status: 503 })
   }
 }
 
